@@ -126,7 +126,7 @@ docker compose pull
 docker compose up -d
 ```
 
-每次启动都会把宿主机 `./config.json` 覆盖进数据卷。改完配置后 `docker compose restart` 即可。WebUI 里保存的配置也会写回数据卷；若同时挂了 seed 文件，下次重启仍以宿主机 `config.json` 为准。
+`./config.json` 直接 bind-mount 到 `/var/lib/opencode2api/config.json`，启动即读取。改完配置后 `docker compose restart` 生效；未创建 `config.json` 时容器会先生成一份示例配置。
 
 健康检查、WebUI 和日志：
 
