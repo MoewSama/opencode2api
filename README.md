@@ -126,12 +126,7 @@ docker compose pull
 docker compose up -d
 ```
 
-首次启动会把 `config.json` 导入 `opencode2api-state` 命名卷。之后应通过 WebUI 修改配置；如需再次从宿主机导入配置，可执行：
-
-```bash
-docker compose cp config.json opencode2api:/var/lib/opencode2api/config.json
-docker compose restart
-```
+每次启动都会把宿主机 `./config.json` 覆盖进数据卷。改完配置后 `docker compose restart` 即可。WebUI 里保存的配置也会写回数据卷；若同时挂了 seed 文件，下次重启仍以宿主机 `config.json` 为准。
 
 健康检查、WebUI 和日志：
 
