@@ -353,7 +353,11 @@ func SaveConfigAtomic(path string, cfg Config) error {
 		}
 	}
 	if err := os.Rename(tempPath, path); err != nil {
-		return fmt.Errorf("replace config: %w", err)
+		// A bind-mounted / single-file mount refuses rename/unlink
+		// ("resource busy" or "file exists"); fall back to in-place
+		// overwrite of the original inode so the host file stays
+		// connected to the mount point.
+		return os.WriteFile(path, data, 0o600)
 	}
 	return nil
 }
