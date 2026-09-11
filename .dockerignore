@@ -7,3 +7,4 @@
 !config.example.json
 !docker-entrypoint.sh
 !Dockerfile
+!bin/opencode2api

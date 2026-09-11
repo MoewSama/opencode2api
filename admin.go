@@ -62,21 +62,33 @@ func NewAdminServer(manager *RuntimeManager, monitor *Monitor, logs *LogHub, log
 
 func (a *AdminServer) Handler() http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("POST /api/auth/login", a.handleLogin)
-	mux.Handle("GET /api/auth/session", a.authenticate(http.HandlerFunc(a.handleSession)))
-	mux.Handle("POST /api/auth/logout", a.authenticate(a.csrf(http.HandlerFunc(a.handleLogout))))
-	mux.Handle("GET /api/config", a.authenticate(http.HandlerFunc(a.handleGetConfig)))
-	mux.Handle("PUT /api/config", a.authenticate(a.csrf(http.HandlerFunc(a.handlePutConfig))))
-	mux.Handle("POST /api/config/reload", a.authenticate(a.csrf(http.HandlerFunc(a.handleReload))))
-	mux.Handle("POST /api/config/reveal", a.authenticate(a.csrf(http.HandlerFunc(a.handleReveal))))
-	mux.Handle("PUT /api/account", a.authenticate(a.csrf(http.HandlerFunc(a.handleAccount))))
-	mux.Handle("GET /api/monitor", a.authenticate(http.HandlerFunc(a.handleMonitor)))
-	mux.Handle("GET /api/debug/models", a.authenticate(http.HandlerFunc(a.handleDebugModels)))
-	mux.Handle("POST /api/debug/inference", a.authenticate(a.csrf(http.HandlerFunc(a.handleDebugInference))))
-	mux.Handle("GET /api/logs", a.authenticate(http.HandlerFunc(a.handleLogs)))
-	mux.Handle("GET /api/logs/stream", a.authenticate(http.HandlerFunc(a.handleLogStream)))
-	mux.Handle("/", a.staticHandler())
+	mux.HandleFunc("POST /admin/api/auth/login", a.handleLogin)
+	mux.Handle("GET /admin/api/auth/session", a.authenticate(http.HandlerFunc(a.handleSession)))
+	mux.Handle("POST /admin/api/auth/logout", a.authenticate(a.csrf(http.HandlerFunc(a.handleLogout))))
+	mux.Handle("GET /admin/api/config", a.authenticate(http.HandlerFunc(a.handleGetConfig)))
+	mux.Handle("PUT /admin/api/config", a.authenticate(a.csrf(http.HandlerFunc(a.handlePutConfig))))
+	mux.Handle("POST /admin/api/config/reload", a.authenticate(a.csrf(http.HandlerFunc(a.handleReload))))
+	mux.Handle("POST /admin/api/config/reveal", a.authenticate(a.csrf(http.HandlerFunc(a.handleReveal))))
+	mux.Handle("PUT /admin/api/account", a.authenticate(a.csrf(http.HandlerFunc(a.handleAccount))))
+	mux.Handle("GET /admin/api/monitor", a.authenticate(http.HandlerFunc(a.handleMonitor)))
+	mux.Handle("GET /admin/api/debug/models", a.authenticate(http.HandlerFunc(a.handleDebugModels)))
+	mux.Handle("POST /admin/api/debug/inference", a.authenticate(a.csrf(http.HandlerFunc(a.handleDebugInference))))
+	mux.Handle("GET /admin/api/logs", a.authenticate(http.HandlerFunc(a.handleLogs)))
+	mux.Handle("GET /admin/api/logs/stream", a.authenticate(http.HandlerFunc(a.handleLogStream)))
+	mux.Handle("/admin/", a.staticHandler())
+	mux.Handle("/admin", http.RedirectHandler("/admin/", http.StatusFound))
 	return a.securityHeaders(recoveryMiddleware(a.logger, mux))
+}
+
+func mountAdmin(api http.Handler, admin *AdminServer) http.Handler {
+	adminHandler := admin.Handler()
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/admin" || strings.HasPrefix(r.URL.Path, "/admin/") {
+			adminHandler.ServeHTTP(w, r)
+			return
+		}
+		api.ServeHTTP(w, r)
+	})
 }
 
 func (a *AdminServer) staticHandler() http.Handler {
@@ -84,18 +96,35 @@ func (a *AdminServer) staticHandler() http.Handler {
 	if err != nil {
 		panic(err)
 	}
-	files := http.FileServer(http.FS(assets))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasPrefix(r.URL.Path, "/api/") {
+		if strings.HasPrefix(r.URL.Path, "/admin/api/") {
 			writeAdminError(w, http.StatusNotFound, "not_found", "management endpoint not found")
 			return
 		}
-		if r.URL.Path != "/" && r.URL.Path != "/index.html" {
-			if _, err := fs.Stat(assets, strings.TrimPrefix(r.URL.Path, "/")); err != nil {
-				r.URL.Path = "/"
-			}
+		rel := strings.TrimPrefix(r.URL.Path, "/admin")
+		rel = strings.TrimPrefix(rel, "/")
+		if rel == "" || strings.HasSuffix(rel, "/") {
+			rel = "index.html"
 		}
-		files.ServeHTTP(w, r)
+		if _, err := fs.Stat(assets, rel); err != nil {
+			rel = "index.html"
+		}
+		data, err := fs.ReadFile(assets, rel)
+		if err != nil {
+			writeAdminError(w, http.StatusNotFound, "not_found", "asset not found")
+			return
+		}
+		ctype := http.DetectContentType(data)
+		if strings.HasSuffix(rel, ".html") {
+			ctype = "text/html; charset=utf-8"
+		} else if strings.HasSuffix(rel, ".js") {
+			ctype = "text/javascript; charset=utf-8"
+		} else if strings.HasSuffix(rel, ".css") {
+			ctype = "text/css; charset=utf-8"
+		}
+		w.Header().Set("Content-Type", ctype)
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(data)
 	})
 }
 
@@ -153,7 +182,7 @@ func (a *AdminServer) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	a.sessions[tokenDigest(token)] = adminSession{Username: cfg.WebUI.Username, AuthVersion: secretFingerprint(cfg.WebUI.PasswordHash), CSRF: csrf, Expires: expires}
 	a.mu.Unlock()
-	http.SetCookie(w, &http.Cookie{Name: adminCookieName, Value: token, Path: "/", HttpOnly: true, SameSite: http.SameSiteStrictMode, Expires: expires, MaxAge: int(time.Until(expires).Seconds()), Secure: requestIsSecure(r)})
+	http.SetCookie(w, &http.Cookie{Name: adminCookieName, Value: token, Path: "/admin", HttpOnly: true, SameSite: http.SameSiteStrictMode, Expires: expires, MaxAge: int(time.Until(expires).Seconds()), Secure: requestIsSecure(r)})
 	w.Header().Set("Cache-Control", "no-store")
 	a.logger.Info("admin login succeeded", "component", "auth", "event", "login_succeeded", "client_ip", client)
 	writeJSON(w, http.StatusOK, map[string]any{"username": cfg.WebUI.Username, "csrf_token": csrf, "expires_at": expires.UTC()})
@@ -172,7 +201,7 @@ func (a *AdminServer) handleLogout(w http.ResponseWriter, r *http.Request) {
 		delete(a.sessions, tokenDigest(cookie.Value))
 		a.mu.Unlock()
 	}
-	http.SetCookie(w, &http.Cookie{Name: adminCookieName, Value: "", Path: "/", HttpOnly: true, SameSite: http.SameSiteStrictMode, MaxAge: -1, Secure: requestIsSecure(r)})
+	http.SetCookie(w, &http.Cookie{Name: adminCookieName, Value: "", Path: "/admin", HttpOnly: true, SameSite: http.SameSiteStrictMode, MaxAge: -1, Secure: requestIsSecure(r)})
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -260,13 +289,11 @@ type ConfigView struct {
 
 type EffectiveView struct {
 	Listen       string `json:"listen"`
-	WebUIListen  string `json:"webui_listen"`
 	WebUIEnabled bool   `json:"webui_enabled"`
 }
 
 type WebUIView struct {
-	Enabled           bool   `json:"enabled"`
-	Listen            string `json:"listen"`
+	Enabled           bool `json:"enabled"`
 	Username          string `json:"username"`
 	SessionTTLMinutes int    `json:"session_ttl_minutes"`
 }
@@ -328,7 +355,7 @@ func (a *AdminServer) handlePutConfig(w http.ResponseWriter, r *http.Request) {
 	candidate := Config{
 		Listen: update.Listen, ServerKeys: serverKeys, ZenKeys: zenKeys, GoKeys: goKeys, Anonymous: update.Anonymous, Proxies: proxies, ProxyFile: update.ProxyFile,
 		Upstream: update.Upstream, Retry: update.Retry, Models: update.Models, Performance: update.Performance, Logging: update.Logging, Prefer: update.Prefer,
-		WebUI: WebUIConfig{Enabled: update.WebUI.Enabled, Listen: update.WebUI.Listen, Username: current.WebUI.Username, PasswordHash: current.WebUI.PasswordHash, SessionTTLMinutes: update.WebUI.SessionTTLMinutes},
+		WebUI: WebUIConfig{Enabled: update.WebUI.Enabled, Username: current.WebUI.Username, PasswordHash: current.WebUI.PasswordHash, SessionTTLMinutes: update.WebUI.SessionTTLMinutes},
 	}
 	result, err := a.manager.Apply(candidate, true)
 	if err != nil {
@@ -394,7 +421,7 @@ func (a *AdminServer) handleAccount(w http.ResponseWriter, r *http.Request) {
 	a.mu.Lock()
 	a.sessions = make(map[string]adminSession)
 	a.mu.Unlock()
-	http.SetCookie(w, &http.Cookie{Name: adminCookieName, Value: "", Path: "/", HttpOnly: true, SameSite: http.SameSiteStrictMode, MaxAge: -1, Secure: requestIsSecure(r)})
+	http.SetCookie(w, &http.Cookie{Name: adminCookieName, Value: "", Path: "/admin", HttpOnly: true, SameSite: http.SameSiteStrictMode, MaxAge: -1, Secure: requestIsSecure(r)})
 	a.logger.Info("admin account updated", "component", "auth", "event", "account_updated", "client_ip", clientIP(r))
 	writeJSON(w, http.StatusOK, map[string]any{"updated": true, "reauthenticate": true})
 }
@@ -652,8 +679,8 @@ func (a *AdminServer) configView() ConfigView {
 		Listen: cfg.Listen, ServerKeys: maskSecrets(cfg.ServerKeys, false), ZenKeys: maskSecrets(cfg.ZenKeys, false), GoKeys: maskSecrets(cfg.GoKeys, false), Anonymous: cfg.Anonymous,
 		Proxies: maskSecrets(cfg.Proxies, true), ProxyFile: cfg.ProxyFile, Upstream: cfg.Upstream, Retry: cfg.Retry, Models: cfg.Models,
 		Performance: cfg.Performance, Logging: cfg.Logging, Prefer: cfg.Prefer,
-		WebUI:     WebUIView{Enabled: cfg.WebUI.Enabled, Listen: cfg.WebUI.Listen, Username: cfg.WebUI.Username, SessionTTLMinutes: cfg.WebUI.SessionTTLMinutes},
-		Effective: EffectiveView{Listen: effective.API, WebUIListen: effective.WebUI, WebUIEnabled: effective.WebUIEnabled},
+		WebUI:     WebUIView{Enabled: cfg.WebUI.Enabled, Username: cfg.WebUI.Username, SessionTTLMinutes: cfg.WebUI.SessionTTLMinutes},
+		Effective: EffectiveView{Listen: effective.API, WebUIEnabled: effective.WebUIEnabled},
 		Restart:   restart,
 	}
 }

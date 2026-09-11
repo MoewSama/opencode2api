@@ -1,47 +1,24 @@
-FROM --platform=$BUILDPLATFORM golang:1.24-alpine AS builder
+FROM alpine:latest
 
-ARG TARGETOS
-ARG TARGETARCH
 ARG VERSION=dev
 
-WORKDIR /src
+RUN apk add --no-cache ca-certificates tzdata && update-ca-certificates
 
-COPY go.mod go.sum ./
-RUN go mod download
+WORKDIR /app
 
-COPY . .
+COPY bin/opencode2api /app/opencode2api
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint
+COPY config.example.json /app/config.example.json
 
-RUN CGO_ENABLED=0 \
-    GOOS="${TARGETOS:-linux}" \
-    GOARCH="${TARGETARCH:-amd64}" \
-    go build \
-      -trimpath \
-      -ldflags="-s -w -X main.version=${VERSION}" \
-      -o /out/opencode2api ./
-
-FROM alpine:3.22
-
-RUN apk add --no-cache ca-certificates su-exec tzdata \
-    && addgroup -S opencode2api \
-    && adduser -S -G opencode2api -h /var/lib/opencode2api opencode2api \
-    && mkdir -p /app /var/lib/opencode2api \
-    && chown -R opencode2api:opencode2api /app /var/lib/opencode2api
-
-COPY --from=builder /out/opencode2api /usr/local/bin/opencode2api
-COPY --chmod=0755 docker-entrypoint.sh /usr/local/bin/docker-entrypoint
-COPY --chown=opencode2api:opencode2api config.example.json /app/config.example.json
+RUN chmod +x /app/opencode2api /usr/local/bin/docker-entrypoint \
+    && mkdir -p /var/lib/opencode2api
 
 ENV CONFIG_PATH=/var/lib/opencode2api/config.json \
     CONFIG_SEED_PATH= \
     LISTEN_ADDRESS=0.0.0.0:8080 \
-    WEBUI_LISTEN_ADDRESS=0.0.0.0:8081 \
-    STATE_DIR=/var/lib/opencode2api
+    STATE_DIR=/var/lib/opencode2api \
+    VERSION=${VERSION}
 
-WORKDIR /app
-
-EXPOSE 8080 8081
-
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD wget -q -O /dev/null http://127.0.0.1:8080/healthz || exit 1
+EXPOSE 8080
 
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint"]

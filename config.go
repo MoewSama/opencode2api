@@ -55,7 +55,7 @@ type LoggingConfig struct {
 
 type WebUIConfig struct {
 	Enabled           bool   `json:"enabled"`
-	Listen            string `json:"listen"`
+	Listen            string `json:"listen,omitempty"`
 	Username          string `json:"username"`
 	Password          string `json:"password,omitempty"`
 	PasswordHash      string `json:"password_hash,omitempty"`
@@ -81,13 +81,13 @@ func LoadConfig(path string) (Config, error) {
 		return Config{}, fmt.Errorf("parse %s: %w", path, err)
 	}
 	cfg := Config{
-		Listen:      "127.0.0.1:8080",
+		Listen:      "0.0.0.0:8080",
 		Upstream:    UpstreamConfig{Zen: "https://opencode.ai/zen", Go: "https://opencode.ai/zen/go"},
 		Retry:       RetryConfig{MaxAttempts: 3, TimeoutSeconds: 300},
 		Models:      ModelsConfig{RefreshSeconds: 300, Protocols: map[string]string{}},
 		Performance: PerformanceConfig{MaxIdleConns: 2048, MaxIdleConnsPerHost: 256, MaxConnsPerHost: 0, IdleConnTimeoutSeconds: 120, ConnectTimeoutSeconds: 5, FailureCooldownSeconds: 15},
 		Logging:     LoggingConfig{Level: "info", RingSize: 2000},
-		WebUI:       WebUIConfig{Listen: "0.0.0.0:8081", SessionTTLMinutes: 720},
+		WebUI:       WebUIConfig{Enabled: true, Username: "admin", SessionTTLMinutes: 720},
 		Prefer:      TierGo,
 	}
 	dec := json.NewDecoder(bytes.NewReader(data))
@@ -153,11 +153,8 @@ func NormalizeConfig(path string, cfg Config) (Config, error) {
 		return Config{}, errors.New("webui.password must contain at least 10 characters")
 	}
 	if cfg.WebUI.Enabled {
-		cfg.WebUI.Listen = strings.TrimSpace(cfg.WebUI.Listen)
+		cfg.WebUI.Listen = ""
 		cfg.WebUI.Username = strings.TrimSpace(cfg.WebUI.Username)
-		if cfg.WebUI.Listen == "" {
-			return Config{}, errors.New("webui.listen must not be empty when webui is enabled")
-		}
 		if cfg.WebUI.Username == "" {
 			return Config{}, errors.New("webui.username must not be empty when webui is enabled")
 		}

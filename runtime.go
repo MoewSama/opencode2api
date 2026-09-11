@@ -42,14 +42,13 @@ type RuntimeManager struct {
 
 type effectiveListeners struct {
 	API          string
-	WebUI        string
 	WebUIEnabled bool
 }
 
 func NewRuntimeManager(root context.Context, configPath string, cfg Config, logger *slog.Logger, monitor *Monitor, hub *LogHub, redactor *SecretRedactor, level *slog.LevelVar) (*RuntimeManager, error) {
 	manager := &RuntimeManager{
 		configPath: configPath, root: root, logger: logger, monitor: monitor, hub: hub, redactor: redactor, level: level,
-		effective: effectiveListeners{API: cfg.Listen, WebUI: cfg.WebUI.Listen, WebUIEnabled: cfg.WebUI.Enabled},
+		effective: effectiveListeners{API: cfg.Listen, WebUIEnabled: cfg.WebUI.Enabled},
 	}
 	manager.metadata = newModelMetadataStore(configPath, logger)
 	// models.dev refreshes ride the active runtime's healthy proxy transports
@@ -143,9 +142,6 @@ func (m *RuntimeManager) RestartStatus() (effectiveListeners, []string) {
 	if cfg.Listen != m.effective.API {
 		fields = append(fields, "listen")
 	}
-	if cfg.WebUI.Listen != m.effective.WebUI {
-		fields = append(fields, "webui.listen")
-	}
 	if cfg.WebUI.Enabled != m.effective.WebUIEnabled {
 		fields = append(fields, "webui.enabled")
 	}
@@ -203,9 +199,6 @@ func (m *RuntimeManager) Apply(candidate Config, persist bool) (ApplyResult, err
 	result := ApplyResult{Applied: true}
 	if normalized.Listen != m.effective.API {
 		result.RestartFields = append(result.RestartFields, "listen")
-	}
-	if normalized.WebUI.Listen != m.effective.WebUI {
-		result.RestartFields = append(result.RestartFields, "webui.listen")
 	}
 	if normalized.WebUI.Enabled != m.effective.WebUIEnabled {
 		result.RestartFields = append(result.RestartFields, "webui.enabled")

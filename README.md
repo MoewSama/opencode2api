@@ -21,7 +21,7 @@
 - 代理失败后自动迁移绑定，key 失败后进行短时冷却
 - 根据真实上游流量识别代理故障，并每 15 分钟通过 Cloudflare trace 并行复查异常代理
 - 为不同会话生成不同的 OpenCode 会话 ID，并支持 `x-opencode-session`、`x-session-id` 和 `conversation-id` 显式指定会话
-- 内置独立端口 Field Manual WebUI，可管理配置、查看 Token/上游指标、诊断路由、运行三协议 Playground 与订阅实时日志
+- 内置 Field Manual WebUI，挂载在同一端口的 `/admin`，可管理配置、查看 Token/上游指标、诊断路由、运行三协议 Playground 与订阅实时日志
 - WebUI 使用账号密码、服务端 session、HttpOnly Cookie、CSRF 与登录限速保护
 - WebUI 保存后原子写入配置并热切换 Gateway；无效配置不会影响当前流量
 - stdout 输出结构化 JSON 日志；请求、Token、上游尝试与最近一小时滚动指标仅保存在进程内存中
@@ -44,10 +44,10 @@
 
 ## WebUI
 
-示例配置会在独立的 `8081` 端口启动管理界面：
+管理界面与 API 共用 `8080`，路径为 `/admin`：
 
 ```text
-http://服务器地址:8081
+http://服务器地址:8080/admin
 ```
 
 首次账号为 `admin`，密码来自 `webui.password`。服务第一次成功启动时会使用 Argon2id 将密码转换为带盐哈希，写入 `webui.password_hash`，并从配置中删除明文密码。请在首次登录后立即修改示例密码。
@@ -60,7 +60,7 @@ Token 页面展示用量覆盖率、每分钟趋势、模型排行与 Zen/Go Tie
 
 ### 监控字段
 
-登录 WebUI 后，`GET /api/monitor` 返回以下顶层字段；该管理 API 只在 `webui.listen` 上提供，并受 Session 保护：
+登录 WebUI 后，`GET /admin/api/monitor` 返回以下顶层字段；该管理 API 挂在 `/admin` 下，并受 Session 保护：
 
 | 字段 | 内容 |
 | --- | --- |
@@ -82,8 +82,8 @@ lifetime 从当前进程启动开始；last hour 使用 60 个一分钟 Bucket�
 
 | 方法 | 路径 | 用途 |
 | --- | --- | --- |
-| `GET` | `/api/debug/models` | 模型路由、原生协议、协议来源、Zen/Go 可用性、匿名资格/来源、成本与 metadata 状态。 |
-| `POST` | `/api/debug/inference` | 通过真实 Gateway 发起 Chat、Responses 或 Anthropic 非流式诊断请求。 |
+| `GET` | `/admin/api/debug/models` | 模型路由、原生协议、协议来源、Zen/Go 可用性、匿名资格/来源、成本与 metadata 状态。 |
+| `POST` | `/admin/api/debug/inference` | 通过真实 Gateway 发起 Chat、Responses 或 Anthropic 非流式诊断请求。 |
 
 请求格式：
 
@@ -111,15 +111,14 @@ go build -o opencode2api ./
 
 ## 下载
 
-预编译的 Windows、Linux 和 macOS 可执行文件可从 [GitHub Releases](https://github.com/jasonxu114514/opencode2api/releases) 下载。
+预编译的 linux/amd64 可执行文件可从 [GitHub Releases](https://github.com/MoewSama/opencode2api/releases) 下载。
 
 ## GHCR / Docker Compose 部署
 
-正式镜像发布在 `ghcr.io/jasonxu114514/opencode2api`
-
+正式镜像发布在 `ghcr.io/moewsama/opencode2api`，标签为 `latest` 与版本号（如 `v1.0.0`）。
 
 ```bash
-git clone https://github.com/jasonxu114514/opencode2api.git
+git clone https://github.com/MoewSama/opencode2api.git
 cd opencode2api
 cp config.example.json config.json
 # 编辑 server_keys、zen_keys/go_keys，并修改 webui.password
@@ -138,14 +137,14 @@ docker compose restart
 
 ```bash
 curl http://127.0.0.1:8080/healthz
-# 浏览器打开 http://127.0.0.1:8081
+# 浏览器打开 http://127.0.0.1:8080/admin
 docker compose logs -f
 ```
 
 可通过环境变量固定镜像版本和修改宿主机端口：
 
 ```bash
-OPENCODE2API_VERSION=v1.2.3 OPENCODE2API_PORT=18080 OPENCODE2API_WEBUI_PORT=18081 docker compose up -d
+OPENCODE2API_VERSION=v1.2.3 OPENCODE2API_PORT=18080 docker compose up -d
 ```
 
 不使用 Compose 时也可直接运行 GHCR 镜像：
@@ -153,11 +152,11 @@ OPENCODE2API_VERSION=v1.2.3 OPENCODE2API_PORT=18080 OPENCODE2API_WEBUI_PORT=1808
 ```bash
 docker volume create opencode2api-state
 docker run -d --name opencode2api --restart unless-stopped \
-  -p 8080:8080 -p 8081:8081 \
+  -p 8080:8080 \
   -e CONFIG_SEED_PATH=/run/config/opencode2api.json \
   -v "$(pwd)/config.json:/run/config/opencode2api.json:ro" \
   -v opencode2api-state:/var/lib/opencode2api \
-  ghcr.io/jasonxu114514/opencode2api:latest
+  ghcr.io/moewsama/opencode2api:latest
 ```
 
 ## 配置
@@ -172,7 +171,7 @@ cp config.example.json config.json
 
 ```json
 {
-  "listen": "127.0.0.1:8080",
+  "listen": "0.0.0.0:8080",
   "server_keys": ["change-this-local-key"],
   "zen_keys": ["sk-your-zen-key"],
   "go_keys": [],
@@ -206,7 +205,6 @@ cp config.example.json config.json
   },
   "webui": {
     "enabled": true,
-    "listen": "0.0.0.0:8081",
     "username": "admin",
     "password": "change-this-admin-password",
     "session_ttl_minutes": 720
@@ -218,7 +216,7 @@ cp config.example.json config.json
 
 | 字段 | 含义 |
 | --- | --- |
-| `listen` | 本地监听地址。默认建议使用 `127.0.0.1:8080`，避免服务直接暴露到公网。 |
+| `listen` | 本地监听地址。默认 `0.0.0.0:8080`，API 与 `/admin` 共用此端口。 |
 | `server_keys` | 调用本代理时使用的本地 API key 列表。它们只用于本地鉴权，不会发送给 OpenCode。 |
 | `zen_keys` | OpenCode Zen API key 池。允许配置多个 key。 |
 | `go_keys` | OpenCode Zen Go API key 池。没有 Go key 时可以使用空数组。 |
@@ -356,8 +354,7 @@ socks5://127.0.0.1:1080  # 备用代理
 
 | 字段 | 含义 |
 | --- | --- |
-| `webui.enabled` | 是否在独立端口启动管理服务。旧配置未包含该段时默认关闭。 |
-| `webui.listen` | 管理服务监听地址，示例为 `0.0.0.0:8081`。 |
+| `webui.enabled` | 是否在同一端口挂载 `/admin` 管理界面。 |
 | `webui.username` | 单一管理员账号。 |
 | `webui.password` | 仅用于首次初始化的明文密码，至少 10 个字符；启动后自动删除。 |
 | `webui.password_hash` | 自动生成的 Argon2id 哈希，不应手动编辑，也不会由 WebUI API 返回。 |
@@ -369,7 +366,7 @@ WebUI 中普通配置响应只包含 key 尾码/指纹及脱敏 proxy；运行�
 
 WebUI 保存时先解析并验证完整候选配置、创建新的连接池和 Gateway，然后写入临时文件、保留 `config.json.bak` 并替换 `config.json`，最后原子切换新请求使用的运行实例。写入或初始化失败时旧实例继续工作；切换前已开始的请求不会中断。
 
-keys、proxy、上游、重试、模型、性能、优先 tier 和日志级别会立即生效。`listen`、`webui.listen` 与 `webui.enabled` 会保存但需要重启进程。WebUI 也提供“从磁盘重载”，外部编辑后的配置仍会经过相同的验证与回滚流程。保存后的 JSON 会被规范化，原有注释不会保留。
+keys、proxy、上游、重试、模型、性能、优先 tier 和日志级别会立即生效。`listen` 与 `webui.enabled` 会保存但需要重启进程。WebUI 也提供“从磁盘重载”，外部编辑后的配置仍会经过相同的验证与回滚流程。保存后的 JSON 会被规范化，原有注释不会保留。
 
 
 ## 会话 ID

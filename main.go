@@ -15,8 +15,7 @@ var version = "dev"
 
 func main() {
 	configPath := flag.String("config", "config.json", "path to config.json")
-	listen := flag.String("listen", "", "override the configured API listen address")
-	webListen := flag.String("web-listen", "", "override the configured WebUI listen address")
+	listen := flag.String("listen", "", "override the configured listen address")
 	flag.Parse()
 
 	cfg, err := LoadConfig(*configPath)
@@ -26,9 +25,6 @@ func main() {
 	}
 	if *listen != "" {
 		cfg.Listen = *listen
-	}
-	if *webListen != "" {
-		cfg.WebUI.Listen = *webListen
 	}
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -47,28 +43,21 @@ func main() {
 	}
 	defer manager.Shutdown()
 
-	apiServer := &http.Server{
-		Addr: cfg.Listen, Handler: manager.Handler(), ReadHeaderTimeout: 15 * time.Second, IdleTimeout: 120 * time.Second,
-	}
-	servers := []*http.Server{apiServer}
-	go serveHTTP(cancel, logger, apiServer, "api")
-
+	handler := manager.Handler()
 	if cfg.WebUI.Enabled {
 		admin := NewAdminServer(manager, monitor, hub, logger)
-		webServer := &http.Server{
-			Addr: cfg.WebUI.Listen, Handler: admin.Handler(), ReadHeaderTimeout: 15 * time.Second, IdleTimeout: 120 * time.Second,
-		}
-		servers = append(servers, webServer)
-		go serveHTTP(cancel, logger, webServer, "webui")
+		handler = mountAdmin(handler, admin)
 	}
+	server := &http.Server{
+		Addr: cfg.Listen, Handler: handler, ReadHeaderTimeout: 15 * time.Second, IdleTimeout: 120 * time.Second,
+	}
+	go serveHTTP(cancel, logger, server, "api")
 
 	<-ctx.Done()
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer shutdownCancel()
-	for _, server := range servers {
-		if err := server.Shutdown(shutdownCtx); err != nil {
-			logger.Error("graceful shutdown failed", "component", "server", "event", "shutdown_failed", "address", server.Addr, "error", err)
-		}
+	if err := server.Shutdown(shutdownCtx); err != nil {
+		logger.Error("graceful shutdown failed", "component", "server", "event", "shutdown_failed", "address", server.Addr, "error", err)
 	}
 }
 

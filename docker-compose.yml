@@ -1,0 +1,17 @@
+services:
+  opencode2api:
+    image: ghcr.io/moewsama/opencode2api:${OPENCODE2API_VERSION:-latest}
+    pull_policy: always
+    restart: unless-stopped
+    environment:
+      CONFIG_PATH: /var/lib/opencode2api/config.json
+      CONFIG_SEED_PATH: /run/config/opencode2api.json
+      LISTEN_ADDRESS: 0.0.0.0:8080
+    ports:
+      - "${OPENCODE2API_PORT:-8080}:8080"
+    volumes:
+      - ./config.json:/run/config/opencode2api.json:ro
+      - opencode2api-state:/var/lib/opencode2api
+
+volumes:
+  opencode2api-state:
