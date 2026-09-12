@@ -7,10 +7,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 )
 
@@ -117,6 +119,11 @@ func NormalizeConfig(path string, cfg Config) (Config, error) {
 	if cfg.Listen == "" {
 		return Config{}, errors.New("listen must not be empty")
 	}
+	if _, port, err := net.SplitHostPort(cfg.Listen); err != nil {
+		return Config{}, fmt.Errorf("listen must be a valid host:port address")
+	} else if n, err := strconv.Atoi(strings.TrimSpace(port)); err != nil || n < 1 || n > 65535 {
+		return Config{}, fmt.Errorf("listen port must be between 1 and 65535")
+	}
 	cfg.Upstream.Zen = strings.TrimSpace(cfg.Upstream.Zen)
 	cfg.Upstream.Go = strings.TrimSpace(cfg.Upstream.Go)
 	for name, raw := range map[string]string{"upstream.zen": cfg.Upstream.Zen, "upstream.go": cfg.Upstream.Go} {
@@ -131,17 +138,17 @@ func NormalizeConfig(path string, cfg Config) (Config, error) {
 	if !cfg.Anonymous && len(cfg.ZenKeys) == 0 && len(cfg.GoKeys) == 0 {
 		return Config{}, errors.New("zen_keys or go_keys must contain at least one upstream key unless anonymous is enabled")
 	}
-	if cfg.Retry.MaxAttempts < 1 {
-		return Config{}, errors.New("retry.max_attempts must be at least 1")
+	if cfg.Retry.MaxAttempts < 1 || cfg.Retry.MaxAttempts > 10 {
+		return Config{}, errors.New("retry.max_attempts must be between 1 and 10")
 	}
-	if cfg.Retry.TimeoutSeconds < 1 {
-		return Config{}, errors.New("retry.timeout_seconds must be at least 1")
+	if cfg.Retry.TimeoutSeconds < 1 || cfg.Retry.TimeoutSeconds > 3600 {
+		return Config{}, errors.New("retry.timeout_seconds must be between 1 and 3600")
 	}
-	if cfg.Models.RefreshSeconds < 1 {
-		return Config{}, errors.New("models.refresh_seconds must be at least 1")
+	if cfg.Models.RefreshSeconds < 1 || cfg.Models.RefreshSeconds > 86400 {
+		return Config{}, errors.New("models.refresh_seconds must be between 1 and 86400")
 	}
-	if cfg.Performance.MaxIdleConns < 1 || cfg.Performance.MaxIdleConnsPerHost < 1 || cfg.Performance.MaxConnsPerHost < 0 || cfg.Performance.IdleConnTimeoutSeconds < 1 || cfg.Performance.ConnectTimeoutSeconds < 1 || cfg.Performance.FailureCooldownSeconds < 1 {
-		return Config{}, errors.New("performance values must be positive (max_conns_per_host may be zero for unlimited)")
+	if cfg.Performance.MaxIdleConns < 1 || cfg.Performance.MaxIdleConns > 8192 || cfg.Performance.MaxIdleConnsPerHost < 1 || cfg.Performance.MaxIdleConnsPerHost > 1024 || cfg.Performance.MaxConnsPerHost < 0 || cfg.Performance.MaxConnsPerHost > 1024 || cfg.Performance.IdleConnTimeoutSeconds < 1 || cfg.Performance.IdleConnTimeoutSeconds > 3600 || cfg.Performance.ConnectTimeoutSeconds < 1 || cfg.Performance.ConnectTimeoutSeconds > 300 || cfg.Performance.FailureCooldownSeconds < 1 || cfg.Performance.FailureCooldownSeconds > 3600 {
+		return Config{}, errors.New("performance values out of range (max_idle_conns 1-8192, max_idle_conns_per_host 1-1024, max_conns_per_host 0-1024, idle_conn_timeout_seconds 1-3600, connect_timeout_seconds 1-300, failure_cooldown_seconds 1-3600)")
 	}
 	if cfg.Logging.Level != "debug" && cfg.Logging.Level != "info" && cfg.Logging.Level != "warn" && cfg.Logging.Level != "error" {
 		return Config{}, errors.New("logging.level must be debug, info, warn, or error")

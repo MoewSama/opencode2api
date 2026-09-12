@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 )
@@ -24,7 +25,11 @@ func main() {
 		os.Exit(1)
 	}
 	if *listen != "" {
-		cfg.Listen = *listen
+		cfg.Listen = strings.TrimSpace(*listen)
+		if _, err := NormalizeConfig(*configPath, cfg); err != nil {
+			slog.Error("invalid listen override", "error", err)
+			os.Exit(1)
+		}
 	}
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

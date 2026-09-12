@@ -49,6 +49,7 @@ type AdminServer struct {
 	mu            sync.Mutex
 	sessions      map[string]adminSession
 	attempts      map[string]loginWindow
+	passwordAttempts map[string]loginWindow
 	debugAttempts map[string]loginWindow
 	lastInference *DebugInferenceResult
 }
@@ -56,7 +57,7 @@ type AdminServer struct {
 func NewAdminServer(manager *RuntimeManager, monitor *Monitor, logs *LogHub, logger *slog.Logger) *AdminServer {
 	return &AdminServer{
 		manager: manager, monitor: monitor, logs: logs, logger: logger, sessions: make(map[string]adminSession),
-		attempts: make(map[string]loginWindow), debugAttempts: make(map[string]loginWindow),
+		attempts: make(map[string]loginWindow), passwordAttempts: make(map[string]loginWindow), debugAttempts: make(map[string]loginWindow),
 	}
 }
 
@@ -383,8 +384,13 @@ func (a *AdminServer) handleReveal(w http.ResponseWriter, r *http.Request) {
 		writeAdminError(w, http.StatusBadRequest, "invalid_request", err.Error())
 		return
 	}
+	if !a.allowPasswordCheck(clientIP(r)) {
+		writeAdminError(w, http.StatusTooManyRequests, "rate_limited", "too many password attempts; try again later")
+		return
+	}
 	cfg := a.manager.Config()
 	if !verifyPassword(cfg.WebUI.PasswordHash, input.Password) {
+		a.recordPasswordFailure(clientIP(r))
 		writeAdminError(w, http.StatusForbidden, "verification_failed", "password verification failed")
 		return
 	}
@@ -404,7 +410,12 @@ func (a *AdminServer) handleAccount(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	cfg := a.manager.Config()
+	if !a.allowPasswordCheck(clientIP(r)) {
+		writeAdminError(w, http.StatusTooManyRequests, "rate_limited", "too many password attempts; try again later")
+		return
+	}
 	if !verifyPassword(cfg.WebUI.PasswordHash, input.CurrentPassword) {
+		a.recordPasswordFailure(clientIP(r))
 		writeAdminError(w, http.StatusForbidden, "verification_failed", "current password is incorrect")
 		return
 	}
@@ -759,6 +770,39 @@ func (a *AdminServer) recordLoginFailure(client string) {
 	}
 	window.Count++
 	a.attempts[client] = window
+}
+
+// allowPasswordCheck rate-limits the authenticated password-verification
+// endpoints (reveal/account) per client IP: 10 failures per 5 minutes.
+// Successful verification does not consume the budget.
+func (a *AdminServer) allowPasswordCheck(client string) bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	now := time.Now()
+	window := a.passwordAttempts[client]
+	if window.Started.IsZero() || now.Sub(window.Started) > 5*time.Minute {
+		return true
+	}
+	return window.Count < 10
+}
+
+func (a *AdminServer) recordPasswordFailure(client string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	now := time.Now()
+	window := a.passwordAttempts[client]
+	if window.Started.IsZero() || now.Sub(window.Started) > 5*time.Minute {
+		window = loginWindow{Started: now}
+	}
+	window.Count++
+	a.passwordAttempts[client] = window
+	if len(a.passwordAttempts) > 4096 {
+		for key, candidate := range a.passwordAttempts {
+			if now.Sub(candidate.Started) > 5*time.Minute {
+				delete(a.passwordAttempts, key)
+			}
+		}
+	}
 }
 
 func (a *AdminServer) allowDebug(client string) bool {

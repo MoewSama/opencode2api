@@ -384,7 +384,10 @@ func (parser *bridgeStreamParser) parseChatEvent(eventName string, value map[str
 		events = append(events, bridgeStreamEvent{Kind: "usage", Usage: &usage})
 	}
 	for _, raw := range sliceAt(value, "choices") {
-		choice, _ := raw.(map[string]any)
+		choice, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
 		delta := mapAt(choice, "delta")
 		if reasoning := firstString(stringAt(delta, "reasoning_content"), stringAt(delta, "reasoning")); reasoning != "" {
 			events = append(events, bridgeStreamEvent{Kind: "reasoning", Text: reasoning})
@@ -393,7 +396,10 @@ func (parser *bridgeStreamParser) parseChatEvent(eventName string, value map[str
 			events = append(events, bridgeStreamEvent{Kind: "text", Text: text})
 		}
 		for _, rawCall := range sliceAt(delta, "tool_calls") {
-			call, _ := rawCall.(map[string]any)
+			call, ok := rawCall.(map[string]any)
+			if !ok {
+				continue
+			}
 			key := fmt.Sprint(firstAny(call["index"], stringAt(call, "id")))
 			function := mapAt(call, "function")
 			id := stringAt(call, "id")

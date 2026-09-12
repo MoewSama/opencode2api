@@ -14,9 +14,7 @@ RUN chmod +x /app/opencode2api /usr/local/bin/docker-entrypoint \
     && mkdir -p /var/lib/opencode2api
 
 ENV CONFIG_PATH=/var/lib/opencode2api/config.json \
-    CONFIG_SEED_PATH= \
     LISTEN_ADDRESS=0.0.0.0:8080 \
-    STATE_DIR=/var/lib/opencode2api \
     VERSION=${VERSION}
 
 EXPOSE 8080

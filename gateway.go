@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math/rand"
 	"net/http"
 	"strings"
 	"sync"
@@ -292,8 +293,16 @@ func (g *Gateway) handleInference(external Protocol) http.HandlerFunc {
 			meta.Request = ids.Request
 		}
 		stream := boolAt(payload, "stream")
-		requestCtx, cancel := context.WithTimeout(r.Context(), time.Duration(g.cfg.Retry.TimeoutSeconds)*time.Second)
-		defer cancel()
+		// The configured timeout bounds request setup and non-streaming
+		// responses. Streaming responses carry their own lifetime: once the
+		// upstream headers arrive the body is forwarded until either side
+		// disconnects, so a long-lived stream must not be cut by this budget.
+		requestCtx := r.Context()
+		if !stream {
+			var cancel context.CancelFunc
+			requestCtx, cancel = context.WithTimeout(r.Context(), time.Duration(g.cfg.Retry.TimeoutSeconds)*time.Second)
+			defer cancel()
+		}
 		resp, upstreamRoute, err := g.doUpstream(requestCtx, route, bodies, ids)
 		if err != nil {
 			finalTier := route.Tier
@@ -344,6 +353,14 @@ func (g *Gateway) handleInference(external Protocol) http.HandlerFunc {
 		responseBody, err := io.ReadAll(io.LimitReader(resp.Body, 64<<20))
 		if err != nil {
 			writeAPIError(w, external, http.StatusBadGateway, "failed to read upstream response", "upstream_error", ids.Request)
+			return
+		}
+		if len(responseBody) == 64<<20 {
+			// io.LimitReader stops silently at the cap; a body exactly at
+			// the limit is almost certainly truncated. Refuse to serve a
+			// partial JSON payload as a successful response.
+			g.logger.Warn("upstream response exceeded size limit", "component", "upstream", "event", "response_too_large", "request_id", ids.Request, "model", model, "limit_bytes", 64<<20)
+			writeAPIError(w, external, http.StatusBadGateway, "upstream response exceeded size limit", "upstream_error", ids.Request)
 			return
 		}
 		if usage, reported := extractResponseUsage(upstreamRoute.Protocol, responseBody); meta != nil {
@@ -655,6 +672,28 @@ func (g *Gateway) doKeyUpstream(ctx context.Context, route modelRoute, bodies ma
 		return nil, fmt.Errorf("no prepared %s request body", route.Tier), 0
 	}
 	for attempts < g.cfg.Retry.MaxAttempts {
+		if attempts > 0 {
+			// Small linear backoff with jitter between key rotations so a
+			// failing tier does not spin through the pool in a hot loop.
+			jitterNanos := time.Duration(rand.Int63n(int64(100 * time.Millisecond)))
+			backoff := time.Duration(attempts) * 150 * time.Millisecond
+			if backoff > 2*time.Second {
+				backoff = 2 * time.Second
+			}
+			timer := time.NewTimer(backoff + jitterNanos)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				if lastResponse != nil {
+					return lastResponse, nil, attempts
+				}
+				if lastErr == nil {
+					lastErr = ctx.Err()
+				}
+				return nil, lastErr, attempts
+			case <-timer.C:
+			}
+		}
 		node := cursor.Next()
 		if node == nil {
 			break
@@ -823,7 +862,14 @@ func newUpstreamRequest(ctx context.Context, baseURL string, protocol Protocol, 
 }
 
 func isNonRetryableClientResponse(resp *http.Response, err error) bool {
-	return err == nil && resp != nil && resp.StatusCode >= 400 && resp.StatusCode < 500 && resp.StatusCode != http.StatusUnauthorized && resp.StatusCode != http.StatusForbidden && resp.StatusCode != http.StatusTooManyRequests
+	if err != nil || resp == nil {
+		return false
+	}
+	// Authentication and rate-limit responses are deterministic for the
+	// key in use: retrying the same key (or burning the rest of the pool
+	// on the same request) cannot succeed. 429 additionally deserves a
+	// cooldown so the next request does not hammer a limited key.
+	return resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden || resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 400 && resp.StatusCode < 500
 }
 
 // syncProxyResult updates proxy health from real traffic. Only timeouts and

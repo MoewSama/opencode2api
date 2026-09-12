@@ -145,14 +145,14 @@ OPENCODE2API_VERSION=v1.2.3 OPENCODE2API_PORT=18080 docker compose up -d
 不使用 Compose 时也可直接运行 GHCR 镜像：
 
 ```bash
-docker volume create opencode2api-state
 docker run -d --name opencode2api --restart unless-stopped \
   -p 8080:8080 \
-  -e CONFIG_SEED_PATH=/run/config/opencode2api.json \
-  -v "$(pwd)/config.json:/run/config/opencode2api.json:ro" \
-  -v opencode2api-state:/var/lib/opencode2api \
+  -e LISTEN_ADDRESS=0.0.0.0:8080 \
+  -v "$(pwd)/config.json:/var/lib/opencode2api/config.json" \
   ghcr.io/moewsama/opencode2api:latest
 ```
+
+首次启动时若宿主机 `config.json` 不存在，Docker 会把挂载点创建为空目录；entrypoint 会自动改用同目录下的 `config.local.json` 并从示例配置生成，服务仍能启动。
 
 ## 配置
 

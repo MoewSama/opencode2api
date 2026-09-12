@@ -539,8 +539,8 @@ func validateBridgeRequest(protocol Protocol, request bridgeRequest) error {
 		blocks = append(blocks, message.Blocks...)
 	}
 	for _, block := range blocks {
-		if block.Kind == "file" && protocol == ProtocolAnthropic && block.FileID != "" && block.Data == "" && block.URL == "" {
-			return fmt.Errorf("file %q cannot be represented by Anthropic Messages without file data or a URL", block.FileID)
+		if block.Kind == "file" && protocol == ProtocolAnthropic && block.Data == "" && block.URL == "" {
+			return fmt.Errorf("file %q cannot be represented by Anthropic Messages without file data or a URL", firstString(block.FileID, block.Filename, "unnamed"))
 		}
 	}
 	return nil
@@ -1318,7 +1318,10 @@ func decodeBridgeResponse(protocol Protocol, input map[string]any) (bridgeRespon
 		if len(choices) == 0 {
 			return response, fmt.Errorf("chat response contains no choices")
 		}
-		choice, _ := choices[0].(map[string]any)
+		choice, ok := choices[0].(map[string]any)
+		if !ok {
+			return response, fmt.Errorf("chat response choice must be an object")
+		}
 		message := mapAt(choice, "message")
 		response.Reasoning = decodeChatReasoning(message)
 		blocks, err := decodeOpenAIBlocksChecked(message["content"])
@@ -1330,7 +1333,10 @@ func decodeBridgeResponse(protocol Protocol, input map[string]any) (bridgeRespon
 			return response, err
 		}
 		for _, raw := range sliceAt(message, "tool_calls") {
-			call, _ := raw.(map[string]any)
+			call, ok := raw.(map[string]any)
+			if !ok {
+				return response, fmt.Errorf("chat response tool_call must be an object")
+			}
 			function := mapAt(call, "function")
 			response.Tools = append(response.Tools, bridgeBlock{
 				Kind:          "tool_call",
@@ -1343,7 +1349,10 @@ func decodeBridgeResponse(protocol Protocol, input map[string]any) (bridgeRespon
 		response.Usage = decodeOpenAIUsage(mapAt(input, "usage"))
 	case ProtocolResponses:
 		for _, raw := range sliceAt(input, "output") {
-			item, _ := raw.(map[string]any)
+			item, ok := raw.(map[string]any)
+			if !ok {
+				return response, fmt.Errorf("Responses response output item must be an object")
+			}
 			switch stringAt(item, "type") {
 			case "reasoning":
 				response.Reasoning = append(response.Reasoning, decodeResponsesReasoning(item)...)

@@ -169,9 +169,10 @@ func (r *SecretRedactor) Replace(cfg Config) {
 
 func (r *SecretRedactor) String(value string) string {
 	for _, secret := range r.values.Load().([]string) {
-		if len(secret) >= 4 {
-			value = strings.ReplaceAll(value, secret, "***")
+		if secret == "" {
+			continue
 		}
+		value = strings.ReplaceAll(value, secret, "***")
 	}
 	return value
 }

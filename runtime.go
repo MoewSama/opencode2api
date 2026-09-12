@@ -343,10 +343,12 @@ func secretFingerprint(value string) string {
 // keyDisplayID is intentionally separate from secretFingerprint. The latter
 // is an internal stable identifier used by session/config bookkeeping; this
 // value is safe for logs and the operator UI and shows only the key suffix.
+// Keys of 5 characters or fewer carry too little entropy to display safely,
+// so they are fully redacted.
 func keyDisplayID(value string) string {
 	runes := []rune(value)
 	if len(runes) <= 5 {
-		return string(runes)
+		return "***"
 	}
 	return string(runes[len(runes)-5:])
 }

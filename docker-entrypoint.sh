@@ -8,10 +8,13 @@ if [ "$#" -gt 0 ]; then
     exec "$@"
 fi
 
-# Docker bind-mounting a non-existent host file creates an empty directory;
-# fall back to the example config so the service still starts.
+# Docker bind-mounts a non-existent host FILE as an empty directory.
+# The mount point itself is busy and cannot be removed from inside the
+# container, so point the app at a writable sibling copy seeded from the
+# example config instead of exiting.
 if [ -e "$config_path" ] && [ ! -f "$config_path" ]; then
-    rmdir "$config_path" 2>/dev/null || true
+    config_path="$(dirname "$config_path")/config.local.json"
+    printf '%s\n' "Config mount is a directory; using $config_path instead."
 fi
 
 if [ ! -f "$config_path" ]; then
