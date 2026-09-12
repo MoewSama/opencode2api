@@ -165,6 +165,30 @@ func TestFixAnthropicFileValidation(t *testing.T) {
 	}
 }
 
+func TestFixResponsesMediaInSystemRejected(t *testing.T) {
+	img := bridgeRequest{System: []bridgeBlock{{Kind: "image", URL: "https://x/y.png"}}}
+	if err := validateBridgeRequest(ProtocolResponses, img); err == nil {
+		t.Fatal("system image silently dropped for Responses")
+	}
+	file := bridgeRequest{System: []bridgeBlock{{Kind: "file", Data: "Zg=="}}}
+	if err := validateBridgeRequest(ProtocolResponses, file); err == nil {
+		t.Fatal("system file silently dropped for Responses")
+	}
+	dev := bridgeRequest{Developer: []bridgeBlock{{Kind: "image", URL: "https://x/y.png"}}}
+	if err := validateBridgeRequest(ProtocolResponses, dev); err == nil {
+		t.Fatal("developer image silently dropped for Responses")
+	}
+	// Pure-text system/developer must still pass.
+	ok := bridgeRequest{
+		System:    []bridgeBlock{{Kind: "text", Text: "sys"}},
+		Developer: []bridgeBlock{{Kind: "text", Text: "dev"}},
+		Messages:  []bridgeMessage{{Role: "user", Blocks: []bridgeBlock{{Kind: "text", Text: "hi"}}}},
+	}
+	if err := validateBridgeRequest(ProtocolResponses, ok); err != nil {
+		t.Fatal("text-only request wrongly rejected:", err)
+	}
+}
+
 func TestFixRetryableSemantics(t *testing.T) {
 	resp := func(code int) *http.Response { return &http.Response{StatusCode: code} }
 	for _, code := range []int{400, 404, 422, 401, 403, 429} {

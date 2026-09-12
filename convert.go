@@ -530,6 +530,14 @@ func validateBridgeRequest(protocol Protocol, request bridgeRequest) error {
 			if block.Kind == "file" {
 				return errors.New("file content is not valid inside Responses instructions; send it as a message input item")
 			}
+			if block.Kind == "image" {
+				return errors.New("image content is not valid inside Responses instructions; send it as a message input item")
+			}
+		}
+		for _, block := range request.Developer {
+			if block.Kind == "image" || block.Kind == "file" {
+				return errors.New("only text content is valid inside a Responses developer message; send media as a message input item")
+			}
 		}
 	}
 	blocks := make([]bridgeBlock, 0, len(request.System)+len(request.Developer))
