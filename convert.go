@@ -399,6 +399,8 @@ func decodeBridgeRequest(protocol Protocol, input map[string]any) (bridgeRequest
 						request.Developer = append(request.Developer, blocks...)
 					} else if role == "user" || role == "assistant" {
 						request.Messages = append(request.Messages, bridgeMessage{Role: role, Blocks: blocks})
+					} else {
+						return request, fmt.Errorf("input[%d] has unsupported role %q", i, role)
 					}
 				default:
 					return request, fmt.Errorf("input[%d] has unsupported Responses item type %q", i, stringAt(item, "type"))

@@ -153,7 +153,9 @@ func NormalizeConfig(path string, cfg Config) (Config, error) {
 		return Config{}, errors.New("webui.password must contain at least 10 characters")
 	}
 	if cfg.WebUI.Enabled {
-		cfg.WebUI.Listen = ""
+		if strings.TrimSpace(cfg.WebUI.Listen) != "" {
+			return Config{}, errors.New("webui.listen is no longer supported: the admin UI is served from the main listen address under /admin; remove webui.listen from the config")
+		}
 		cfg.WebUI.Username = strings.TrimSpace(cfg.WebUI.Username)
 		if cfg.WebUI.Username == "" {
 			return Config{}, errors.New("webui.username must not be empty when webui is enabled")
@@ -283,9 +285,23 @@ func resolveProxyFiles(configPath string, cfg *Config) error {
 	trimList(&cfg.Proxies)
 	effective := append([]string(nil), cfg.Proxies...)
 	if cfg.ProxyFile != "" {
-		resolved := cfg.ProxyFile
-		if !filepath.IsAbs(resolved) {
-			resolved = filepath.Join(filepath.Dir(configPath), resolved)
+		// proxyfile is accepted from the authenticated management API as
+		// well as the config file, so it must never become an arbitrary
+		// local-file read primitive: only a relative path inside the config
+		// directory is allowed.
+		if filepath.IsAbs(cfg.ProxyFile) {
+			return errors.New("proxyfile must be a relative path inside the config directory")
+		}
+		cleaned := filepath.Clean(cfg.ProxyFile)
+		if cleaned == ".." || strings.HasPrefix(cleaned, ".."+string(filepath.Separator)) {
+			return errors.New("proxyfile must stay inside the config directory")
+		}
+		resolved := filepath.Join(filepath.Dir(configPath), cleaned)
+		if target, err := filepath.EvalSymlinks(resolved); err == nil {
+			base, _ := filepath.Abs(filepath.Dir(configPath))
+			if target != base && !strings.HasPrefix(target, base+string(filepath.Separator)) {
+				return errors.New("proxyfile must stay inside the config directory")
+			}
 		}
 		proxies, err := readProxyFile(resolved)
 		if err != nil {

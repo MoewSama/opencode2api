@@ -16,6 +16,7 @@ import (
 var errStreamUpstreamFailure = errors.New("upstream stream failure delivered")
 var errStreamNormalTermination = errors.New("upstream stream terminated normally")
 var errSSEUnexpectedEOF = errors.New("unexpected end of SSE stream")
+var errSSEObserverBufferFull = errors.New("SSE frame exceeded observer buffer limit")
 
 type streamTermination uint8
 
@@ -215,7 +216,14 @@ func newStreamUsageObserver(protocol Protocol) *streamUsageObserver {
 	}}
 }
 
+const maxSSEObserverBuffer = 16 << 20
+
 func (observer *streamUsageObserver) Write(data []byte) (int, error) {
+	if int64(len(observer.buffer))+int64(len(data)) > maxSSEObserverBuffer {
+		observer.parseErr = errSSEObserverBufferFull
+		observer.buffer = nil
+		return len(data), nil
+	}
 	observer.buffer = append(observer.buffer, data...)
 	for {
 		index, width := nextSSEBoundary(observer.buffer)
