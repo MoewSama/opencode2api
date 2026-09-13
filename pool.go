@@ -147,6 +147,29 @@ func (p *transportPool) healthCounts() (total, healthy int) {
 	return len(p.items), healthy
 }
 
+// rotatingProxySuffixes lists proxy URL path suffixes that identify
+// per-connection rotating proxy gateways (a fresh egress IP per TCP
+// connection). Keep-alive must be disabled for these, otherwise the
+// connection pool pins all requests to the first egress IP it happened
+// to open — defeating the rotation entirely.
+var rotatingProxySuffixes = []string{"/us/", "/eu/", "/global/", "/rotate/"}
+
+// isRotatingProxy reports whether the proxy URL selects a rotating egress
+// pool via a known path suffix.
+func isRotatingProxy(raw string) bool {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return false
+	}
+	path := strings.ToLower(u.Path)
+	for _, suffix := range rotatingProxySuffixes {
+		if strings.HasSuffix(path, suffix) {
+			return true
+		}
+	}
+	return false
+}
+
 func newTransportPool(proxies []string, cfg PerformanceConfig, responseHeaderTimeout time.Duration) (*transportPool, error) {
 	p := &transportPool{items: make([]*proxyTransport, 0, len(proxies))}
 	for _, raw := range proxies {
@@ -157,6 +180,11 @@ func newTransportPool(proxies []string, cfg PerformanceConfig, responseHeaderTim
 		transport.IdleConnTimeout = time.Duration(cfg.IdleConnTimeoutSeconds) * time.Second
 		transport.ResponseHeaderTimeout = responseHeaderTimeout
 		transport.ForceAttemptHTTP2 = true
+		// Rotating gateways hand out a new egress IP per connection; pooled
+		// keep-alive connections would pin every request to one IP.
+		if isRotatingProxy(raw) {
+			transport.DisableKeepAlives = true
+		}
 		transport.DialContext = (&net.Dialer{
 			Timeout:   time.Duration(cfg.ConnectTimeoutSeconds) * time.Second,
 			KeepAlive: 30 * time.Second,
