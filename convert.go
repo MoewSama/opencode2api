@@ -66,6 +66,15 @@ type bridgeRequest struct {
 	Stop        any
 	Reasoning   any
 	Metadata    any
+	// Passthrough sampling/tool fields preserved across protocol bridges.
+	// They round-trip verbatim: decode stores the raw value, encode writes it
+	// back only when non-nil (via put), so same-protocol clones and
+	// cross-protocol bridges never silently drop them.
+	ResponseFormat    any
+	ParallelToolCalls any
+	FrequencyPenalty  any
+	PresencePenalty   any
+	Seed              any
 }
 
 type bridgeUsage struct {
@@ -350,6 +359,11 @@ func decodeBridgeRequest(protocol Protocol, input map[string]any) (bridgeRequest
 			})
 		}
 		request.ToolChoice = decodeChatToolChoice(input["tool_choice"])
+		request.ResponseFormat = input["response_format"]
+		request.ParallelToolCalls = input["parallel_tool_calls"]
+		request.FrequencyPenalty = input["frequency_penalty"]
+		request.PresencePenalty = input["presence_penalty"]
+		request.Seed = input["seed"]
 
 	case ProtocolResponses:
 		request.MaxTokens = input["max_output_tokens"]
@@ -422,6 +436,8 @@ func decodeBridgeRequest(protocol Protocol, input map[string]any) (bridgeRequest
 			})
 		}
 		request.ToolChoice = decodeResponsesToolChoice(input["tool_choice"])
+		request.ResponseFormat = mapAt(input, "text", "format")
+		request.ParallelToolCalls = input["parallel_tool_calls"]
 
 	case ProtocolAnthropic:
 		request.MaxTokens = input["max_tokens"]
@@ -563,6 +579,11 @@ func encodeChatRequest(request bridgeRequest) (map[string]any, error) {
 	if effort := reasoningEffort(request.Reasoning); effort != nil {
 		output["reasoning_effort"] = effort
 	}
+	put(output, "response_format", chatResponseFormat(request.ResponseFormat))
+	put(output, "parallel_tool_calls", request.ParallelToolCalls)
+	put(output, "frequency_penalty", request.FrequencyPenalty)
+	put(output, "presence_penalty", request.PresencePenalty)
+	put(output, "seed", request.Seed)
 	if request.Stream {
 		output["stream_options"] = map[string]any{"include_usage": true}
 	}
@@ -748,6 +769,10 @@ func encodeResponsesRequest(request bridgeRequest) map[string]any {
 			output["reasoning"] = value
 		}
 	}
+	if format := responsesTextFormat(request.ResponseFormat); format != nil {
+		output["text"] = map[string]any{"format": format}
+	}
+	put(output, "parallel_tool_calls", request.ParallelToolCalls)
 
 	items := make([]any, 0, len(request.Messages)+1)
 	if len(request.Developer) > 0 {
@@ -1667,6 +1692,64 @@ func reasoningEffort(value any) any {
 		}
 	}
 	return value
+}
+
+// chatResponseFormat converts a bridge-level response format into the OpenAI
+// Chat Completions shape. Chat and Responses agree on the format type names but
+// not on the json_schema nesting: Responses carries name/schema/strict inline,
+// while Chat nests them under "json_schema". A value that has no Chat
+// equivalent (the "text" type) is omitted instead of failing the request.
+func chatResponseFormat(format any) any {
+	object, ok := format.(map[string]any)
+	if !ok {
+		return nil
+	}
+	switch stringAt(object, "type") {
+	case "json_object":
+		return map[string]any{"type": "json_object"}
+	case "json_schema":
+		if nested, ok := object["json_schema"].(map[string]any); ok {
+			return map[string]any{"type": "json_schema", "json_schema": nested}
+		}
+		nested := make(map[string]any, 4)
+		for _, key := range []string{"name", "description", "schema", "strict"} {
+			if value, exists := object[key]; exists {
+				nested[key] = value
+			}
+		}
+		if len(nested) == 0 {
+			return nil
+		}
+		return map[string]any{"type": "json_schema", "json_schema": nested}
+	default:
+		return nil
+	}
+}
+
+// responsesTextFormat converts a bridge-level response format into the object
+// accepted by the Responses "text.format" field. A Chat-style nested
+// json_schema is flattened into the inline shape Responses expects.
+func responsesTextFormat(format any) any {
+	object, ok := format.(map[string]any)
+	if !ok {
+		return nil
+	}
+	switch stringAt(object, "type") {
+	case "text", "json_object":
+		return object
+	case "json_schema":
+		if nested, ok := object["json_schema"].(map[string]any); ok {
+			flattened := make(map[string]any, len(nested)+1)
+			for key, value := range nested {
+				flattened[key] = value
+			}
+			flattened["type"] = "json_schema"
+			return flattened
+		}
+		return object
+	default:
+		return nil
+	}
 }
 
 func anthropicThinking(value any) (any, map[string]any) {

@@ -14,6 +14,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"time"
 )
 
 type Config struct {
@@ -71,6 +72,29 @@ type PerformanceConfig struct {
 	IdleConnTimeoutSeconds int `json:"idle_conn_timeout_seconds"`
 	ConnectTimeoutSeconds  int `json:"connect_timeout_seconds"`
 	FailureCooldownSeconds int `json:"failure_cooldown_seconds"`
+	AttemptTimeoutSeconds  int `json:"attempt_timeout_seconds"`
+}
+
+// AttemptTimeout bounds how long a single upstream attempt may wait for
+// response headers before it is abandoned and the next node is tried. Values
+// <= 0 keep the historical behavior of using the request-level retry timeout,
+// so existing configs are unaffected. The result never exceeds requestTimeout,
+// and only the header wait is bounded: an established stream keeps flowing
+// under the request-level timeout.
+//
+// The bound is installed on the shared transports, so it covers every attempt
+// in both the anonymous and the authenticated loops. Without it, one hung exit
+// can consume the entire request budget by itself, and the attempts that follow
+// are fired against an already-expired context.
+func (cfg PerformanceConfig) AttemptTimeout(requestTimeout time.Duration) time.Duration {
+	if cfg.AttemptTimeoutSeconds > 0 {
+		attempt := time.Duration(cfg.AttemptTimeoutSeconds) * time.Second
+		if requestTimeout > 0 && attempt > requestTimeout {
+			return requestTimeout
+		}
+		return attempt
+	}
+	return requestTimeout
 }
 
 func LoadConfig(path string) (Config, error) {
@@ -149,6 +173,9 @@ func NormalizeConfig(path string, cfg Config) (Config, error) {
 	}
 	if cfg.Performance.MaxIdleConns < 1 || cfg.Performance.MaxIdleConns > 8192 || cfg.Performance.MaxIdleConnsPerHost < 1 || cfg.Performance.MaxIdleConnsPerHost > 1024 || cfg.Performance.MaxConnsPerHost < 0 || cfg.Performance.MaxConnsPerHost > 1024 || cfg.Performance.IdleConnTimeoutSeconds < 1 || cfg.Performance.IdleConnTimeoutSeconds > 3600 || cfg.Performance.ConnectTimeoutSeconds < 1 || cfg.Performance.ConnectTimeoutSeconds > 300 || cfg.Performance.FailureCooldownSeconds < 1 || cfg.Performance.FailureCooldownSeconds > 3600 {
 		return Config{}, errors.New("performance values out of range (max_idle_conns 1-8192, max_idle_conns_per_host 1-1024, max_conns_per_host 0-1024, idle_conn_timeout_seconds 1-3600, connect_timeout_seconds 1-300, failure_cooldown_seconds 1-3600)")
+	}
+	if cfg.Performance.AttemptTimeoutSeconds < 0 {
+		return Config{}, errors.New("performance.attempt_timeout_seconds must not be negative (0 keeps the retry timeout)")
 	}
 	if cfg.Logging.Level != "debug" && cfg.Logging.Level != "info" && cfg.Logging.Level != "warn" && cfg.Logging.Level != "error" {
 		return Config{}, errors.New("logging.level must be debug, info, warn, or error")

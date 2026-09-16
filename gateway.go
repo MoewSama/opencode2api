@@ -73,7 +73,7 @@ type healthProxies struct {
 }
 
 func NewGateway(cfg Config, logger *slog.Logger, monitor *Monitor) (*Gateway, error) {
-	transports, err := newTransportPool(cfg.RuntimeProxies(), cfg.Performance, time.Duration(cfg.Retry.TimeoutSeconds)*time.Second)
+	transports, err := newTransportPool(cfg.RuntimeProxies(), cfg.Performance, cfg.Performance.AttemptTimeout(time.Duration(cfg.Retry.TimeoutSeconds)*time.Second))
 	if err != nil {
 		return nil, err
 	}
@@ -311,6 +311,12 @@ func (g *Gateway) handleInference(external Protocol) http.HandlerFunc {
 			}
 			keyID, channel, anonymous := requestCredential(requestCtx)
 			g.logger.Warn("all upstream attempts failed", "component", "upstream", "event", "request_failed", "request_id", ids.Request, "tier", finalTier, "key_id", keyID, "channel", channel, "anonymous", anonymous, "error", err)
+			// An exhausted request budget is a timeout, not a bad gateway: the
+			// distinction matters to clients that retry on 502.
+			if errors.Is(err, context.DeadlineExceeded) {
+				writeAPIError(w, external, http.StatusGatewayTimeout, "upstream request timed out", "upstream_timeout", ids.Request)
+				return
+			}
 			writeAPIError(w, external, http.StatusBadGateway, "all upstream attempts failed", "upstream_error", ids.Request)
 			return
 		}
@@ -451,13 +457,17 @@ func (g *Gateway) doUpstream(ctx context.Context, route modelRoute, bodies map[T
 	}
 	// The referenced reasoning items belong to an upstream chain this session
 	// can no longer address (e.g. an interrupted stream). Replay once without
-	// them under a fresh upstream session instead of failing the client
-	// request outright. Attempt numbering continues from the first round so
-	// monitoring never shows duplicate attempt numbers for one request.
-	retryIDs := ids
-	retryIDs.Session = randomID("ses", 12)
+	// them instead of failing the client request outright. Attempt numbering
+	// continues from the first round so monitoring never shows duplicate attempt
+	// numbers for one request.
+	//
+	// The client's session is deliberately preserved: it carries key/proxy
+	// affinity and upstream session correlation. Minting a fresh session made
+	// the replay land on a different node with a cold prompt cache and detached
+	// the reply from the chain the client still holds; the stale references are
+	// already removed from the payload itself.
 	g.logger.Info("retrying upstream without stale reasoning references", "component", "upstream", "event", "reasoning_reference_retry", "request_id", ids.Request, "model", route.ID, "tier", effectiveRoute.Tier, "attempt_offset", attempts)
-	retryResp, retryRoute, _, retryErr := g.doUpstreamTiers(ctx, effectiveRoute, stripped, retryIDs, attempts)
+	retryResp, retryRoute, _, retryErr := g.doUpstreamTiers(ctx, effectiveRoute, stripped, ids, attempts)
 	if retryErr != nil || retryResp == nil || retryResp.StatusCode/100 != 2 {
 		retryStatus := 0
 		if retryResp != nil {
