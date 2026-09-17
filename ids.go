@@ -7,8 +7,16 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"runtime"
 	"strings"
+	"sync/atomic"
+	"time"
+)
+
+const idLength = 24 // matches opencode: 12 hex (time) + 12 base62 suffix (after prefix_)
+
+var (
+	lastTimestamp int64
+	counter       uint32
 )
 
 type requestIDs struct {
@@ -50,10 +58,58 @@ func deriveRequestIDs(r *http.Request, body map[string]any) requestIDs {
 	)
 	return requestIDs{
 		Session:       session,
-		Request:       randomID("req", 16),
-		Project:       stableID("prj", projectSignal),
+		Request:       createTimeID("msg", true),
+		Project:       createTimeID("prj", true),
 		ParentSession: parentSession,
 	}
+}
+
+// createTimeID generates an opencode-compatible time-ordered ID.
+// Matches packages/opencode/src/id/id.ts create(prefix, direction).
+func createTimeID(prefix string, ascending bool) string {
+	nowMs := time.Now().UnixMilli()
+
+	// Per-millisecond counter (matches opencode's atomic counter pattern)
+	lastTs := atomic.LoadInt64(&lastTimestamp)
+	var cnt uint32
+	if nowMs != lastTs {
+		atomic.StoreInt64(&lastTimestamp, nowMs)
+		atomic.StoreUint32(&counter, 1)
+		cnt = 1
+	} else {
+		cnt = atomic.AddUint32(&counter, 1)
+	}
+
+	// 56-bit value: high 48 bits = timestamp<<12, low 16 bits = counter
+	val := (uint64(nowMs) << 12) | uint64(cnt&0xFFFF)
+
+	// Descending direction: invert bits so newer items sort first
+	if !ascending {
+		val = ^val & 0x00FFFFFFFFFFFFFF // 56-bit mask
+	}
+
+	// Top 48 bits as hex (12 chars) — equivalent to (val >> 8)
+	timePart := val >> 8
+
+	buf := make([]byte, 6)
+	buf[0] = byte(timePart >> 40)
+	buf[1] = byte(timePart >> 32)
+	buf[2] = byte(timePart >> 24)
+	buf[3] = byte(timePart >> 16)
+	buf[4] = byte(timePart >> 8)
+	buf[5] = byte(timePart)
+	hexPart := hex.EncodeToString(buf)
+
+	// Random base62 suffix of exact length
+	suffixLen := idLength - 12
+	const base62Chars = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+	suffix := make([]byte, suffixLen)
+	rand.Read(suffix)
+	for i := range suffix {
+		suffix[i] = base62Chars[suffix[i]%62]
+	}
+
+	return prefix + "_" + hexPart + string(suffix)
 }
 
 func conversationSeed(body map[string]any) string {
@@ -98,5 +154,5 @@ func firstString(values ...string) string {
 }
 
 func opencodeUserAgent() string {
-	return fmt.Sprintf("opencode/1.18.21 (%s %s; %s)", runtime.GOOS, runtime.GOARCH, runtime.Version())
+	return "opencode/1.18.31 ai-sdk/provider-utils/4.0.40 runtime/bun/1.3.14"
 }
