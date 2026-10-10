@@ -43,50 +43,78 @@ func New(manager *gateway.RuntimeManager, monitor *telemetry.Monitor, logs *tele
 	}
 }
 
+// AdminBasePath is the prefix the management console is mounted under on the
+// API listener. The console shares the gateway's server, so a deployment only
+// publishes one port instead of a second management listener.
+const AdminBasePath = "/admin"
+
 func (a *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("POST /api/auth/login", a.handleLogin)
-	mux.Handle("GET /api/auth/session", a.authenticate(http.HandlerFunc(a.handleSession)))
-	mux.Handle("POST /api/auth/logout", a.authenticate(a.csrf(http.HandlerFunc(a.handleLogout))))
-	mux.Handle("GET /api/config", a.authenticate(http.HandlerFunc(a.handleGetConfig)))
-	mux.Handle("PUT /api/config", a.authenticate(a.csrf(http.HandlerFunc(a.handlePutConfig))))
-	mux.Handle("POST /api/config/reload", a.authenticate(a.csrf(http.HandlerFunc(a.handleReload))))
-	mux.Handle("POST /api/config/reveal", a.authenticate(a.csrf(http.HandlerFunc(a.handleReveal))))
-	mux.Handle("PUT /api/account", a.authenticate(a.csrf(http.HandlerFunc(a.handleAccount))))
-	mux.Handle("GET /api/monitor", a.authenticate(http.HandlerFunc(a.handleMonitor)))
-	mux.Handle("GET /api/debug/models", a.authenticate(http.HandlerFunc(a.handleDebugModels)))
-	mux.Handle("GET /api/models/availability", a.authenticate(http.HandlerFunc(a.handleAvailability)))
-	mux.Handle("POST /api/models/restore", a.authenticate(a.csrf(http.HandlerFunc(a.handleRestoreModel))))
-	mux.Handle("POST /api/models/manual", a.authenticate(a.csrf(http.HandlerFunc(a.handleManualModel))))
-	mux.Handle("GET /api/rotation", a.authenticate(http.HandlerFunc(a.handleRotation)))
-	mux.Handle("PUT /api/rotation", a.authenticate(a.csrf(http.HandlerFunc(a.handleSaveRotation))))
-	mux.Handle("POST /api/rotation/current", a.authenticate(a.csrf(http.HandlerFunc(a.handleSelectRotation))))
-	mux.Handle("GET /api/model-quotas", a.authenticate(http.HandlerFunc(a.handleModelQuotas)))
-	mux.Handle("GET /api/api-keys", a.authenticate(http.HandlerFunc(a.handleListAPIKeys)))
-	mux.Handle("POST /api/api-keys", a.authenticate(a.csrf(http.HandlerFunc(a.handleCreateAPIKey))))
-	mux.Handle("PATCH /api/api-keys/{id}", a.authenticate(a.csrf(http.HandlerFunc(a.handleUpdateAPIKey))))
-	mux.Handle("DELETE /api/api-keys/{id}", a.authenticate(a.csrf(http.HandlerFunc(a.handleDeleteAPIKey))))
-	mux.Handle("POST /api/debug/inference", a.authenticate(a.csrf(http.HandlerFunc(a.handleDebugInference))))
-	mux.Handle("GET /api/logs", a.authenticate(http.HandlerFunc(a.handleLogs)))
-	mux.Handle("GET /api/logs/stream", a.authenticate(http.HandlerFunc(a.handleLogStream)))
-	mux.Handle("/", a.staticHandler())
+	mux.HandleFunc("POST "+AdminBasePath+"/api/auth/login", a.handleLogin)
+	mux.Handle("GET "+AdminBasePath+"/api/auth/session", a.authenticate(http.HandlerFunc(a.handleSession)))
+	mux.Handle("POST "+AdminBasePath+"/api/auth/logout", a.authenticate(a.csrf(http.HandlerFunc(a.handleLogout))))
+	mux.Handle("GET "+AdminBasePath+"/api/config", a.authenticate(http.HandlerFunc(a.handleGetConfig)))
+	mux.Handle("PUT "+AdminBasePath+"/api/config", a.authenticate(a.csrf(http.HandlerFunc(a.handlePutConfig))))
+	mux.Handle("POST "+AdminBasePath+"/api/config/reload", a.authenticate(a.csrf(http.HandlerFunc(a.handleReload))))
+	mux.Handle("POST "+AdminBasePath+"/api/config/reveal", a.authenticate(a.csrf(http.HandlerFunc(a.handleReveal))))
+	mux.Handle("PUT "+AdminBasePath+"/api/account", a.authenticate(a.csrf(http.HandlerFunc(a.handleAccount))))
+	mux.Handle("GET "+AdminBasePath+"/api/monitor", a.authenticate(http.HandlerFunc(a.handleMonitor)))
+	mux.Handle("GET "+AdminBasePath+"/api/debug/models", a.authenticate(http.HandlerFunc(a.handleDebugModels)))
+	mux.Handle("GET "+AdminBasePath+"/api/models/availability", a.authenticate(http.HandlerFunc(a.handleAvailability)))
+	mux.Handle("POST "+AdminBasePath+"/api/models/restore", a.authenticate(a.csrf(http.HandlerFunc(a.handleRestoreModel))))
+	mux.Handle("POST "+AdminBasePath+"/api/models/manual", a.authenticate(a.csrf(http.HandlerFunc(a.handleManualModel))))
+	mux.Handle("GET "+AdminBasePath+"/api/rotation", a.authenticate(http.HandlerFunc(a.handleRotation)))
+	mux.Handle("PUT "+AdminBasePath+"/api/rotation", a.authenticate(a.csrf(http.HandlerFunc(a.handleSaveRotation))))
+	mux.Handle("POST "+AdminBasePath+"/api/rotation/current", a.authenticate(a.csrf(http.HandlerFunc(a.handleSelectRotation))))
+	mux.Handle("GET "+AdminBasePath+"/api/model-quotas", a.authenticate(http.HandlerFunc(a.handleModelQuotas)))
+	mux.Handle("GET "+AdminBasePath+"/api/api-keys", a.authenticate(http.HandlerFunc(a.handleListAPIKeys)))
+	mux.Handle("POST "+AdminBasePath+"/api/api-keys", a.authenticate(a.csrf(http.HandlerFunc(a.handleCreateAPIKey))))
+	mux.Handle("PATCH "+AdminBasePath+"/api/api-keys/{id}", a.authenticate(a.csrf(http.HandlerFunc(a.handleUpdateAPIKey))))
+	mux.Handle("DELETE "+AdminBasePath+"/api/api-keys/{id}", a.authenticate(a.csrf(http.HandlerFunc(a.handleDeleteAPIKey))))
+	mux.Handle("POST "+AdminBasePath+"/api/debug/inference", a.authenticate(a.csrf(http.HandlerFunc(a.handleDebugInference))))
+	mux.Handle("GET "+AdminBasePath+"/api/logs", a.authenticate(http.HandlerFunc(a.handleLogs)))
+	mux.Handle("GET "+AdminBasePath+"/api/logs/stream", a.authenticate(http.HandlerFunc(a.handleLogStream)))
+	mux.Handle(AdminBasePath+"/", a.staticHandler())
+	mux.Handle(AdminBasePath, http.RedirectHandler(AdminBasePath+"/", http.StatusFound))
 	return a.securityHeaders(telemetry.Recover(a.logger, mux))
 }
 
+// staticHandler serves the embedded console under AdminBasePath. Files are read
+// and written directly rather than through http.FileServer: FileServer answers a
+// request for "index.html" with a redirect to "./", which under a path prefix
+// would bounce the browser out of the console and onto the gateway root.
 func (a *Server) staticHandler() http.Handler {
 	assets := webui.Assets
-	files := http.FileServer(http.FS(assets))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasPrefix(r.URL.Path, "/api/") {
+		if strings.HasPrefix(r.URL.Path, AdminBasePath+"/api/") {
 			writeAdminError(w, http.StatusNotFound, "not_found", "management endpoint not found")
 			return
 		}
-		if r.URL.Path != "/" && r.URL.Path != "/index.html" {
-			if _, err := fs.Stat(assets, strings.TrimPrefix(r.URL.Path, "/")); err != nil {
-				r.URL.Path = "/"
-			}
+		rel := strings.TrimPrefix(r.URL.Path, AdminBasePath)
+		rel = strings.TrimPrefix(rel, "/")
+		if rel == "" || strings.HasSuffix(rel, "/") {
+			rel = "index.html"
 		}
-		files.ServeHTTP(w, r)
+		if _, err := fs.Stat(assets, rel); err != nil {
+			rel = "index.html"
+		}
+		data, err := fs.ReadFile(assets, rel)
+		if err != nil {
+			writeAdminError(w, http.StatusNotFound, "not_found", "asset not found")
+			return
+		}
+		contentType := http.DetectContentType(data)
+		switch {
+		case strings.HasSuffix(rel, ".html"):
+			contentType = "text/html; charset=utf-8"
+		case strings.HasSuffix(rel, ".js"):
+			contentType = "text/javascript; charset=utf-8"
+		case strings.HasSuffix(rel, ".css"):
+			contentType = "text/css; charset=utf-8"
+		}
+		w.Header().Set("Content-Type", contentType)
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(data)
 	})
 }
 
@@ -129,13 +157,12 @@ type ConfigView struct {
 
 type EffectiveView struct {
 	Listen       string `json:"listen"`
-	WebUIListen  string `json:"webui_listen"`
+	WebUIPath    string `json:"webui_path"`
 	WebUIEnabled bool   `json:"webui_enabled"`
 }
 
 type WebUIView struct {
 	Enabled           bool   `json:"enabled"`
-	Listen            string `json:"listen"`
 	Username          string `json:"username"`
 	SessionTTLMinutes int    `json:"session_ttl_minutes"`
 }
@@ -207,7 +234,7 @@ func (a *Server) handlePutConfig(w http.ResponseWriter, r *http.Request) {
 		Listen:            update.Listen, ServerKeys: serverKeys, ZenKeys: zenKeys, GoKeys: goKeys, Anonymous: update.Anonymous, Proxies: proxies, ProxyFile: update.ProxyFile,
 		Upstream: update.Upstream, Retry: update.Retry, Models: update.Models, Performance: update.Performance, Logging: update.Logging, Prefer: update.Prefer,
 		Reasoning: reasoning,
-		WebUI:     config.WebUIConfig{Enabled: update.WebUI.Enabled, Listen: update.WebUI.Listen, Username: current.WebUI.Username, PasswordHash: current.WebUI.PasswordHash, SessionTTLMinutes: update.WebUI.SessionTTLMinutes},
+		WebUI:     config.WebUIConfig{Enabled: update.WebUI.Enabled, Username: current.WebUI.Username, PasswordHash: current.WebUI.PasswordHash, SessionTTLMinutes: update.WebUI.SessionTTLMinutes},
 	}
 	result, err := a.manager.Apply(candidate, true)
 	if err != nil {
@@ -333,8 +360,8 @@ func (a *Server) configView() ConfigView {
 		Listen: cfg.Listen, ServerKeys: maskSecrets(cfg.ServerKeys, false), ZenKeys: maskSecrets(cfg.ZenKeys, false), GoKeys: maskSecrets(cfg.GoKeys, false), Anonymous: cfg.Anonymous,
 		Proxies: maskSecrets(cfg.Proxies, true), ProxyFile: cfg.ProxyFile, Upstream: cfg.Upstream, Retry: cfg.Retry, Models: cfg.Models,
 		Performance: cfg.Performance, Logging: cfg.Logging, Prefer: cfg.Prefer, Reasoning: cfg.Reasoning,
-		WebUI:     WebUIView{Enabled: cfg.WebUI.Enabled, Listen: cfg.WebUI.Listen, Username: cfg.WebUI.Username, SessionTTLMinutes: cfg.WebUI.SessionTTLMinutes},
-		Effective: EffectiveView{Listen: effective.API, WebUIListen: effective.WebUI, WebUIEnabled: effective.WebUIEnabled},
+		WebUI:     WebUIView{Enabled: cfg.WebUI.Enabled, Username: cfg.WebUI.Username, SessionTTLMinutes: cfg.WebUI.SessionTTLMinutes},
+		Effective: EffectiveView{Listen: effective.API, WebUIPath: AdminBasePath + "/", WebUIEnabled: effective.WebUIEnabled},
 		Restart:   restart,
 	}
 }

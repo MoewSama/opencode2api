@@ -7,7 +7,6 @@ config_seed_path=${CONFIG_SEED_PATH:-}
 # Empty means "defer to config.json". Only an explicitly provided value becomes
 # a command-line override, so the file stays authoritative as documented.
 listen_address=${LISTEN_ADDRESS:-}
-webui_listen_address=${WEBUI_LISTEN_ADDRESS:-}
 
 # The image runs as root on purpose (see Dockerfile): no user switch here, only
 # ensure the state dir exists so a fresh named volume is immediately writable.
@@ -37,15 +36,12 @@ if [ ! -f "$config_path" ]; then
         cp /app/config.example.json "$config_path"
         seed_container_listen "$config_path"
         printf '%s\n' \
-            "config.json not found; created $config_path. Set API keys or enable anonymous mode, and change the WebUI password before use."
+            "config.json not found; created $config_path. Set API keys or enable anonymous mode, and change the console password before use."
     fi
 fi
 
 set -- /usr/local/bin/opencode2api -config "$config_path"
 if [ -n "$listen_address" ]; then
     set -- "$@" -listen "$listen_address"
-fi
-if [ -n "$webui_listen_address" ]; then
-    set -- "$@" -web-listen "$webui_listen_address"
 fi
 exec "$@"

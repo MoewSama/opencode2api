@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <title>opencode2api · Field Manual</title>
-    <link rel="stylesheet" href="/styles.css" />
+    <link rel="stylesheet" href="/admin/styles.css" />
   </head>
   <body>
     <section id="login" class="login">
@@ -498,13 +498,13 @@
                   </select>
                 </div>
                 <div class="field"><label>API Listen</label><input id="c-listen" /></div>
-                <div class="field"><label>WebUI Listen</label><input id="c-web-listen" /></div>
                 <div class="field">
                   <label>Session TTL（分钟）</label><input id="c-session" type="number" />
                 </div>
                 <div class="field full">
                   <label class="check-label"
-                    ><input id="c-web-enabled" type="checkbox" />启用 WebUI（修改需重启）</label
+                    ><input id="c-web-enabled" type="checkbox" />启用管理后台（挂载于
+                    /admin，修改需重启）</label
                   >
                 </div>
               </div>
@@ -936,6 +936,6 @@
       </div>
     </div>
     <div id="toast" class="toast hidden"></div>
-    <script src="/app.js" defer></script>
+    <script src="/admin/app.js" defer></script>
   </body>
 </html>

@@ -35,17 +35,17 @@ COPY config.example.json /app/config.example.json
 COPY LICENSE /usr/share/licenses/opencode2api/LICENSE
 LABEL org.opencontainers.image.licenses="GPL-3.0-or-later"
 
-# LISTEN_ADDRESS / WEBUI_LISTEN_ADDRESS are intentionally unset: config.json is
-# authoritative. Export them to override the configured listen addresses.
+# LISTEN_ADDRESS is intentionally unset: config.json is authoritative. Export
+# it to override the configured listen address.
 ENV CONFIG_PATH=/var/lib/opencode2api/config.json \
     CONFIG_SEED_PATH= \
     LISTEN_ADDRESS= \
-    WEBUI_LISTEN_ADDRESS= \
     STATE_DIR=/var/lib/opencode2api
 
 WORKDIR /app
 
-EXPOSE 8080 8081
+# The management console is served from this port under /admin.
+EXPOSE 8080
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD wget -q -O /dev/null http://127.0.0.1:8080/healthz || exit 1

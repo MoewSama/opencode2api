@@ -4,7 +4,7 @@
 
 ## 模型与额度
 
-管理页面 `/#model-quotas`，登录后读取 `GET /api/model-quotas`。
+管理页面 `/admin/#model-quotas`，登录后读取 `GET /admin/api/model-quotas`。
 
 - 模型来自网关同步的 OpenCode Go 目录，支持搜索和复制模型 ID。
 - 额度由网关使用已配置的 Go Key 查询 `https://opencode.ai/zen/go/v1/usage`。浏览器不会收到上游 Key。
@@ -75,10 +75,10 @@ Messages，以及这三种协议的流式输出。真实模型 ID 的原有调�
 
 管理接口均需要现有管理 Session，写入另需 CSRF：
 
-- `GET /api/rotation`：分组配置、可用状态、暂停期限、切换和尝试记录。
-- `PUT /api/rotation`：提交 `sota` / `sweet` 的 `alias`、完整 `order`，以及
+- `GET /admin/api/rotation`：分组配置、可用状态、暂停期限、切换和尝试记录。
+- `PUT /admin/api/rotation`：提交 `sota` / `sweet` 的 `alias`、完整 `order`，以及
   `first_output_seconds`；别名不得重复或与真实模型 ID 冲突，成员不得跨组。
-- `POST /api/rotation/current`：`{"group":"sota","model":"glm-5.3"}`；立即
+- `POST /admin/api/rotation/current`：`{"group":"sota","model":"glm-5.3"}`；立即
   修改当前模型并解除该模型的临时暂停。
 
 验证：`go test -race ./...`、`go vet ./...`、`npm run check:web`。

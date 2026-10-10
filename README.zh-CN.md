@@ -45,21 +45,20 @@ go build -o opencode2api ./cmd/opencode2api
 
 Windows 下使用 `Copy-Item config.example.json config.json` 复制配置，执行 `go build -o opencode2api.exe ./cmd/opencode2api` 编译，再运行 `.\opencode2api.exe -config config.json`。
 
-示例配置的 API 监听 `127.0.0.1:8080`，WebUI 监听 `0.0.0.0:8081`。本机可访问 `http://localhost:8081`。通过网络访问管理界面时，请限制访问范围，并使用 HTTPS 反向代理。
+示例配置监听 `127.0.0.1:8080`。管理后台内嵌在同一进程内，通过该端口的 `/admin` 提供，本机可访问 `http://localhost:8080/admin/`。通过网络访问该路径时，请限制访问范围，并使用 HTTPS 反向代理。
 
 命令行参数：
 
-| 参数          | 默认值        | 用途                  |
-| ------------- | ------------- | --------------------- |
-| `-config`     | `config.json` | 配置文件路径。        |
-| `-listen`     | 未设置        | 覆盖 API 监听地址。   |
-| `-web-listen` | 未设置        | 覆盖 WebUI 监听地址。 |
+| 参数      | 默认值        | 用途           |
+| --------- | ------------- | -------------- |
+| `-config` | `config.json` | 配置文件路径。 |
+| `-listen` | 未设置        | 覆盖监听地址。 |
 
 配置所在目录需要可写，以便迁移密码、保存配置和写入模型缓存。
 
 ## Docker 部署
 
-已发布镜像：`ghcr.io/jasonxu114514/opencode2api`。
+已发布镜像：`ghcr.io/moewsama/opencode2api`。
 
 ```bash
 cp config.example.json config.json
@@ -75,17 +74,15 @@ docker compose cp config.json opencode2api:/var/lib/opencode2api/config.json
 docker compose restart
 ```
 
-容器内的服务进程使用普通用户运行。Compose 启用只读根文件系统，并提供可写状态卷和临时 `/tmp` 文件系统。
+容器内的服务进程以 root 运行（有意为之）：它是单进程应用，状态目录通常是运维方自己持有的绑定挂载，降权到构建期 uid 只会引入 id 映射失败的可能，并不能额外保护什么。Compose 仍启用只读根文件系统，并提供可写状态卷和临时 `/tmp` 文件系统。
 
-| Compose 环境变量            | 默认值   | 作用                                 |
-| --------------------------- | -------- | ------------------------------------ |
-| `OPENCODE2API_VERSION`      | `latest` | 镜像标签；可指定发行标签来固定版本。 |
-| `OPENCODE2API_PORT`         | `8080`   | 映射到容器 8080 的宿主机端口。       |
-| `OPENCODE2API_WEBUI_PORT`   | `8081`   | 映射到容器 8081 的宿主机端口。       |
-| `OPENCODE2API_LISTEN`       | 未设置   | 显式覆盖容器内 API 监听地址。        |
-| `OPENCODE2API_WEBUI_LISTEN` | 未设置   | 显式覆盖容器内 WebUI 监听地址。      |
+| Compose 环境变量       | 默认值   | 作用                                 |
+| ---------------------- | -------- | ------------------------------------ |
+| `OPENCODE2API_VERSION` | `latest` | 镜像标签；可指定发行标签来固定版本。 |
+| `OPENCODE2API_PORT`    | `8080`   | 映射到容器 8080 的宿主机端口。       |
+| `OPENCODE2API_LISTEN`  | 未设置   | 显式覆盖容器内监听地址。             |
 
-后两项在容器内对应 `LISTEN_ADDRESS` 与 `WEBUI_LISTEN_ADDRESS`。值为空时使用配置文件中的地址。首次初始化配置时，入口脚本会将示例 API 地址 `127.0.0.1:8080` 改为 `0.0.0.0:8080`，使其能够通过发布端口访问。
+该变量在容器内对应 `LISTEN_ADDRESS`。值为空时使用配置文件中的地址。首次初始化配置时，入口脚本会将示例 API 地址 `127.0.0.1:8080` 改为 `0.0.0.0:8080`，使其能够通过发布端口访问。
 
 修改宿主机端口不会改变容器内监听地址。如果修改容器内 API 端口，还需要同步调整端口映射和镜像健康检查；默认健康检查使用 8080 端口。
 
@@ -95,7 +92,7 @@ docker compose restart
 docker build -t opencode2api:local .
 docker volume create opencode2api-state
 docker run -d --name opencode2api \
-  -p 8080:8080 -p 8081:8081 \
+  -p 8080:8080 \
   -e CONFIG_SEED_PATH=/run/config/opencode2api.json \
   -v "$(pwd)/config.json:/run/config/opencode2api.json:ro" \
   -v opencode2api-state:/var/lib/opencode2api \
@@ -231,7 +228,7 @@ System One 使用原生 `noul` 类型询问“1+1 是否等于 2”，不注入�
 
 状态保存在 `config.json.<上游地址指纹>.availability.json`，重启后保留，按 Zen 上游 URL 隔离。后台每分钟检查到期项，跳过手动控制的模型，串行探测其余模型，每条通道最多等待 60 秒。
 
-管理接口：`GET /api/models/availability` 查看状态；`POST /api/models/restore` 携带 `{"model":"MODEL_ID"}` 恢复并进入手动控制；`POST /api/models/manual` 携带 `{"model":"MODEL_ID","manual":true|false}` 在手动与自动之间切换。均需管理登录，写入接口还需 CSRF 校验。
+管理接口：`GET /admin/api/models/availability` 查看状态；`POST /admin/api/models/restore` 携带 `{"model":"MODEL_ID"}` 恢复并进入手动控制；`POST /admin/api/models/manual` 携带 `{"model":"MODEL_ID","manual":true|false}` 在手动与自动之间切换。均需管理登录，写入接口还需 CSRF 校验。
 
 ### 会话与代理
 
@@ -289,8 +286,8 @@ Responses 近似表达，而强制指定的强度可以到达单独靠预算表�
 块遮蔽，`budget_tokens` 保持其档位（`8192` 为 `high`，`32000` 为 `xhigh`，
 两者可区分），发往 Responses 时强度会以 `reasoning.effort` 形式传递而不再丢失。
 
-WebUI 的配置中心也提供默认强度和按模型覆盖。管理 API 的 `GET /api/config`
-会返回 `reasoning`，`PUT /api/config` 接受同名对象；省略该字段会保留现有值，
+WebUI 的配置中心也提供默认强度和按模型覆盖。管理 API 的 `GET /admin/api/config`
+会返回 `reasoning`，`PUT /admin/api/config` 接受同名对象；省略该字段会保留现有值，
 发送空对象则会清除它。
 
 代理支持 `direct`、`http://`、`https://`、`socks5://` 和 `socks5h://`，URL 可包含认证信息。配置内代理先加载，再追加 `proxyfile` 内容，并按首次出现的顺序去重。
@@ -330,7 +327,6 @@ direct
 | `logging.ring_size`           | `2000`；范围为 100–50,000。                     |
 | `logging.dump_request_bodies` | `false`；配合 `debug` 日志级别输出上游请求体。  |
 | `webui.enabled`               | 省略时为 `false`；示例配置设置为 `true`。       |
-| `webui.listen`                | `0.0.0.0:8081`。                                |
 | `webui.username`              | 启用 WebUI 时必填；示例为 `admin`。             |
 | `webui.password`              | 首次初始化密码，最小长度为 10。                 |
 | `webui.password_hash`         | 自动生成的 Argon2id 哈希，用于替代明文密码。    |
@@ -342,20 +338,20 @@ direct
 
 ## WebUI 与诊断
 
-管理监听端口提供 WebUI 和 `/api/*` 接口。认证使用单一管理员账号、服务端 Session、HttpOnly / SameSite Cookie、写操作 CSRF 校验及登录限速。
+管理后台通过网关端口的 `/admin` 提供，接口位于 `/admin/api/*`。认证使用单一管理员账号、服务端 Session、HttpOnly / SameSite Cookie、写操作 CSRF 校验及登录限速。
 
-| 管理接口                                         | 用途                                            |
-| ------------------------------------------------ | ----------------------------------------------- |
-| `POST /api/auth/login`                           | 登录，获取 Session Cookie 和 CSRF Token。       |
-| `GET /api/auth/session`、`POST /api/auth/logout` | 查看或结束当前 Session。                        |
-| `GET /api/config`、`PUT /api/config`             | 读取脱敏配置或应用修改。                        |
-| `POST /api/config/reload`                        | 从磁盘重载配置。                                |
-| `POST /api/config/reveal`                        | 验证密码后查看配置中的敏感值。                  |
-| `PUT /api/account`                               | 验证密码后修改账号，修改后使已有 Session 失效。 |
-| `GET /api/monitor`                               | 请求、Token、上游和资源统计。                   |
-| `GET /api/debug/models`                          | 模型路由、Key 指纹和 metadata 诊断。            |
-| `POST /api/debug/inference`                      | 执行 Playground 请求。                          |
-| `GET /api/logs`、`GET /api/logs/stream`          | 最近日志或 SSE 实时订阅。                       |
+| 管理接口                                               | 用途                                            |
+| ------------------------------------------------------ | ----------------------------------------------- |
+| `POST /admin/api/auth/login`                           | 登录，获取 Session Cookie 和 CSRF Token。       |
+| `GET /admin/api/auth/session`、`POST /api/auth/logout` | 查看或结束当前 Session。                        |
+| `GET /admin/api/config`、`PUT /admin/api/config`       | 读取脱敏配置或应用修改。                        |
+| `POST /admin/api/config/reload`                        | 从磁盘重载配置。                                |
+| `POST /admin/api/config/reveal`                        | 验证密码后查看配置中的敏感值。                  |
+| `PUT /admin/api/account`                               | 验证密码后修改账号，修改后使已有 Session 失效。 |
+| `GET /admin/api/monitor`                               | 请求、Token、上游和资源统计。                   |
+| `GET /admin/api/debug/models`                          | 模型路由、Key 指纹和 metadata 诊断。            |
+| `POST /admin/api/debug/inference`                      | 执行 Playground 请求。                          |
+| `GET /admin/api/logs`、`GET /api/logs/stream`          | 最近日志或 SSE 实时订阅。                       |
 
 Playground 需要已登录的 Session 和 `X-CSRF-Token`，每个客户端 IP 每分钟最多 12 次：
 
@@ -370,7 +366,7 @@ Playground 需要已登录的 Session 和 `X-CSRF-Token`，每个客户端 IP �
 }
 ```
 
-服务端强制设置 `stream: false`。需要指定 Key 时，使用 `{"mode":"selected","tier":"zen","id":"KEY_FINGERPRINT"}`，其中指纹来自 `/api/debug/models`。指定 Key 的诊断最多执行一次上游尝试，不进入匿名通道，不轮换 Key，不切换 Tier，也不重放 reasoning 请求。
+服务端强制设置 `stream: false`。需要指定 Key 时，使用 `{"mode":"selected","tier":"zen","id":"KEY_FINGERPRINT"}`，其中指纹来自 `/admin/api/debug/models`。指定 Key 的诊断最多执行一次上游尝试，不进入匿名通道，不轮换 Key，不切换 Tier，也不重放 reasoning 请求。
 
 **自动模式和指定 Key 模式都不会改变生产 Key 的冷却、失败次数，以及代理的健康状态和绑定关系。** 诊断仍会真实访问上游，可能消耗供应商配额，并会计入监控。
 
@@ -380,7 +376,7 @@ Playground 需要已登录的 Session 和 `X-CSRF-Token`，每个客户端 IP �
 
 服务先验证候选配置并创建新的 Gateway，然后保存配置并切换实例。验证或保存失败时，当前 Gateway 继续处理请求；已经开始的请求继续使用原有实例。
 
-Key、代理、上游地址、重试、模型、日志和路由偏好立即对新请求生效。`listen`、`webui.listen`、`webui.enabled` 的修改需要重启进程。保存后的 JSON 会规范化，不保留原有注释。
+Key、代理、上游地址、重试、模型、日志和路由偏好立即对新请求生效。`listen`、`webui.enabled` 的修改需要重启进程。保存后的 JSON 会规范化，不保留原有注释。
 
 ## 监控与持久化
 

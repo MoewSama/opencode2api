@@ -48,15 +48,17 @@ type RuntimeManager struct {
 }
 
 type effectiveListeners struct {
-	API          string
-	WebUI        string
+	API string
+	// WebUIEnabled tracks whether the management console is mounted on the API
+	// listener. Toggling it changes the handler chain built at startup, so it
+	// still requires a restart.
 	WebUIEnabled bool
 }
 
 func NewRuntimeManager(root context.Context, configPath string, cfg config.Config, logger *slog.Logger, monitor *telemetry.Monitor, hub *telemetry.LogHub, redactor *config.SecretRedactor, level *slog.LevelVar) (*RuntimeManager, error) {
 	manager := &RuntimeManager{
 		configPath: configPath, root: root, logger: logger, monitor: monitor, hub: hub, redactor: redactor, level: level,
-		effective: effectiveListeners{API: cfg.Listen, WebUI: cfg.WebUI.Listen, WebUIEnabled: cfg.WebUI.Enabled},
+		effective: effectiveListeners{API: cfg.Listen, WebUIEnabled: cfg.WebUI.Enabled},
 	}
 	manager.metadata = modelcatalog.NewPricingStore(configPath, logger)
 	// models.dev refreshes ride the active runtime's healthy proxy transports
@@ -180,9 +182,6 @@ func (m *RuntimeManager) RestartStatus() (effectiveListeners, []string) {
 	if cfg.Listen != m.effective.API {
 		fields = append(fields, "listen")
 	}
-	if cfg.WebUI.Listen != m.effective.WebUI {
-		fields = append(fields, "webui.listen")
-	}
 	if cfg.WebUI.Enabled != m.effective.WebUIEnabled {
 		fields = append(fields, "webui.enabled")
 	}
@@ -242,9 +241,6 @@ func (m *RuntimeManager) applyLocked(candidate config.Config, persist bool) (App
 	result := ApplyResult{Applied: true}
 	if normalized.Listen != m.effective.API {
 		result.RestartFields = append(result.RestartFields, "listen")
-	}
-	if normalized.WebUI.Listen != m.effective.WebUI {
-		result.RestartFields = append(result.RestartFields, "webui.listen")
 	}
 	if normalized.WebUI.Enabled != m.effective.WebUIEnabled {
 		result.RestartFields = append(result.RestartFields, "webui.enabled")

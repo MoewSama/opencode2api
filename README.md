@@ -45,21 +45,20 @@ Before starting, edit `config.json`:
 
 On Windows, use `Copy-Item config.example.json config.json`, build with `go build -o opencode2api.exe ./cmd/opencode2api`, then run `.\opencode2api.exe -config config.json`.
 
-The example listens on `127.0.0.1:8080` for the API and `0.0.0.0:8081` for the WebUI. Open `http://localhost:8081` locally. Restrict management access and use an HTTPS reverse proxy when accessing it over a network.
+The example listens on `127.0.0.1:8080`. The management console is embedded in the same process and served from that port under `/admin`, so open `http://localhost:8080/admin/` locally. Restrict access to that path and use an HTTPS reverse proxy when reaching it over a network.
 
 Command-line options:
 
-| Option        | Default       | Purpose                            |
-| ------------- | ------------- | ---------------------------------- |
-| `-config`     | `config.json` | Configuration file path.           |
-| `-listen`     | Unset         | Override the API listen address.   |
-| `-web-listen` | Unset         | Override the WebUI listen address. |
+| Option    | Default       | Purpose                      |
+| --------- | ------------- | ---------------------------- |
+| `-config` | `config.json` | Configuration file path.     |
+| `-listen` | Unset         | Override the listen address. |
 
 The configuration directory must be writable for password migration, configuration saves, and model caches.
 
 ## Docker
 
-The published image is `ghcr.io/jasonxu114514/opencode2api`.
+The published image is `ghcr.io/moewsama/opencode2api`.
 
 ```bash
 cp config.example.json config.json
@@ -75,17 +74,15 @@ docker compose cp config.json opencode2api:/var/lib/opencode2api/config.json
 docker compose restart
 ```
 
-The container runs the service as an unprivileged user. Compose uses a read-only root filesystem, a writable state volume, and a temporary `/tmp` filesystem.
+The container runs the service as root by design: it is a single-process appliance whose state directory is normally a bind mount the operator already owns, so dropping to a build-time uid would only add an id-mapping failure mode. Compose still uses a read-only root filesystem, a writable state volume, and a temporary `/tmp` filesystem.
 
-| Compose variable            | Default  | Effect                                            |
-| --------------------------- | -------- | ------------------------------------------------- |
-| `OPENCODE2API_VERSION`      | `latest` | Image tag. Pin a release tag for a fixed version. |
-| `OPENCODE2API_PORT`         | `8080`   | Host port mapped to container port 8080.          |
-| `OPENCODE2API_WEBUI_PORT`   | `8081`   | Host port mapped to container port 8081.          |
-| `OPENCODE2API_LISTEN`       | Unset    | Explicit container API listen override.           |
-| `OPENCODE2API_WEBUI_LISTEN` | Unset    | Explicit container WebUI listen override.         |
+| Compose variable       | Default  | Effect                                            |
+| ---------------------- | -------- | ------------------------------------------------- |
+| `OPENCODE2API_VERSION` | `latest` | Image tag. Pin a release tag for a fixed version. |
+| `OPENCODE2API_PORT`    | `8080`   | Host port mapped to container port 8080.          |
+| `OPENCODE2API_LISTEN`  | Unset    | Explicit container listen override.               |
 
-The last two variables become `LISTEN_ADDRESS` and `WEBUI_LISTEN_ADDRESS` inside the container. Empty values defer to the configuration file. While initializing a configuration, the entrypoint changes the example API address `127.0.0.1:8080` to `0.0.0.0:8080` so published ports can reach it.
+The variable becomes `LISTEN_ADDRESS` inside the container. An empty value defers to the configuration file. While initializing a configuration, the entrypoint changes the example API address `127.0.0.1:8080` to `0.0.0.0:8080` so published ports can reach it.
 
 Changing host ports does not change container listeners. If you change the internal API port, also update the port mapping and the image health check, which uses port 8080.
 
@@ -95,7 +92,7 @@ For a local image:
 docker build -t opencode2api:local .
 docker volume create opencode2api-state
 docker run -d --name opencode2api \
-  -p 8080:8080 -p 8081:8081 \
+  -p 8080:8080 \
   -e CONFIG_SEED_PATH=/run/config/opencode2api.json \
   -v "$(pwd)/config.json:/run/config/opencode2api.json:ro" \
   -v opencode2api-state:/var/lib/opencode2api \
@@ -329,17 +326,16 @@ The per-attempt header timeout is capped by the request timeout. Set it below th
 
 ### Logging and management
 
-| Field                         | Default / requirement                                         |
-| ----------------------------- | ------------------------------------------------------------- |
-| `logging.level`               | `info`; accepts `debug`, `info`, `warn`, `error`.             |
-| `logging.ring_size`           | `2000`; range 100–50,000.                                     |
-| `logging.dump_request_bodies` | `false`. Requires `debug` logging to emit outbound bodies.    |
-| `webui.enabled`               | `false` when omitted; the example sets it to `true`.          |
-| `webui.listen`                | `0.0.0.0:8081`.                                               |
-| `webui.username`              | Required when the WebUI is enabled; the example uses `admin`. |
-| `webui.password`              | Bootstrap password with a minimum length of 10.               |
-| `webui.password_hash`         | Generated Argon2id hash; replaces the plaintext password.     |
-| `webui.session_ttl_minutes`   | `720`; range 5–10,080.                                        |
+| Field                         | Default / requirement                                                                |
+| ----------------------------- | ------------------------------------------------------------------------------------ |
+| `logging.level`               | `info`; accepts `debug`, `info`, `warn`, `error`.                                    |
+| `logging.ring_size`           | `2000`; range 100–50,000.                                                            |
+| `logging.dump_request_bodies` | `false`. Requires `debug` logging to emit outbound bodies.                           |
+| `webui.enabled`               | `false` when omitted; the example sets it to `true`. Mounts the console at `/admin`. |
+| `webui.username`              | Required when the WebUI is enabled; the example uses `admin`.                        |
+| `webui.password`              | Bootstrap password with a minimum length of 10.                                      |
+| `webui.password_hash`         | Generated Argon2id hash; replaces the plaintext password.                            |
+| `webui.session_ttl_minutes`   | `720`; range 5–10,080.                                                               |
 
 On startup, a bootstrap password is hashed and removed from the configuration. The backup containing that bootstrap plaintext is deleted. Keep configuration files and backups private: upstream keys and proxy credentials remain necessary configuration secrets.
 
@@ -347,20 +343,20 @@ Body dumps are opt-in and capped at 64 KiB per prepared body. Configured secrets
 
 ## WebUI and diagnostics
 
-The management listener serves the UI and `/api/*` routes. Authentication uses one administrator account, server-side sessions, HttpOnly/SameSite cookies, CSRF checks for writes, and login throttling.
+The console is served from the gateway listener under `/admin`, and its endpoints live under `/admin/api/*`. Authentication uses one administrator account, server-side sessions, HttpOnly/SameSite cookies, CSRF checks for writes, and login throttling.
 
-| Management route                                 | Purpose                                                               |
-| ------------------------------------------------ | --------------------------------------------------------------------- |
-| `POST /api/auth/login`                           | Log in and obtain a session cookie and CSRF token.                    |
-| `GET /api/auth/session`, `POST /api/auth/logout` | Inspect or end the session.                                           |
-| `GET /api/config`, `PUT /api/config`             | Read masked configuration or apply changes.                           |
-| `POST /api/config/reload`                        | Reload the file from disk.                                            |
-| `POST /api/config/reveal`                        | Reveal configured secrets after password verification.                |
-| `PUT /api/account`                               | Update credentials after password verification; invalidates sessions. |
-| `GET /api/monitor`                               | Request, token, upstream, and resource statistics.                    |
-| `GET /api/debug/models`                          | Model routes, key fingerprints, and metadata diagnostics.             |
-| `POST /api/debug/inference`                      | Run a Playground request.                                             |
-| `GET /api/logs`, `GET /api/logs/stream`          | Recent logs or a live SSE subscription.                               |
+| Management route                                       | Purpose                                                               |
+| ------------------------------------------------------ | --------------------------------------------------------------------- |
+| `POST /admin/api/auth/login`                           | Log in and obtain a session cookie and CSRF token.                    |
+| `GET /admin/api/auth/session`, `POST /api/auth/logout` | Inspect or end the session.                                           |
+| `GET /admin/api/config`, `PUT /api/config`             | Read masked configuration or apply changes.                           |
+| `POST /admin/api/config/reload`                        | Reload the file from disk.                                            |
+| `POST /admin/api/config/reveal`                        | Reveal configured secrets after password verification.                |
+| `PUT /admin/api/account`                               | Update credentials after password verification; invalidates sessions. |
+| `GET /admin/api/monitor`                               | Request, token, upstream, and resource statistics.                    |
+| `GET /admin/api/debug/models`                          | Model routes, key fingerprints, and metadata diagnostics.             |
+| `POST /admin/api/debug/inference`                      | Run a Playground request.                                             |
+| `GET /admin/api/logs`, `GET /api/logs/stream`          | Recent logs or a live SSE subscription.                               |
 
 Playground requests require a session and `X-CSRF-Token` and are limited to 12 per minute per client IP:
 
@@ -375,7 +371,7 @@ Playground requests require a session and `X-CSRF-Token` and are limited to 12 p
 }
 ```
 
-The server forces `stream: false`. Use `{"mode":"selected","tier":"zen","id":"KEY_FINGERPRINT"}` to test a specific key from `/api/debug/models`. A selected request makes at most one upstream attempt, without anonymous access, key rotation, tier fallback, or reasoning replay.
+The server forces `stream: false`. Use `{"mode":"selected","tier":"zen","id":"KEY_FINGERPRINT"}` to test a specific key from `/admin/api/debug/models`. A selected request makes at most one upstream attempt, without anonymous access, key rotation, tier fallback, or reasoning replay.
 
 **Both automatic and selected diagnostics preserve production key cooldowns, failure counts, proxy health, and bindings.** They still make real upstream requests, can consume provider quota, and appear in monitoring.
 
@@ -385,7 +381,7 @@ After execution, the management endpoint returns HTTP 200 with the actual result
 
 The server validates a candidate configuration and builds its replacement gateway before saving and switching. Failed validation or persistence leaves the active gateway in place. Requests already running continue on their original gateway.
 
-Keys, proxies, upstream URLs, retry settings, model settings, logging, and routing preferences apply to new requests immediately. Changes to `listen`, `webui.listen`, or `webui.enabled` require a process restart. Saved JSON is normalized; comments are not retained.
+Keys, proxies, upstream URLs, retry settings, model settings, logging, and routing preferences apply to new requests immediately. Changes to `listen` or `webui.enabled` require a process restart. Saved JSON is normalized; comments are not retained.
 
 ## Monitoring and persistence
 

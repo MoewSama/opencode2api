@@ -73,7 +73,7 @@ async function enterConsole(session) {
 }
 async function boot() {
   try {
-    await enterConsole(await api("/api/auth/session"));
+    await enterConsole(await api("/admin/api/auth/session"));
   } catch (_) {
     showLogin();
   }
@@ -82,7 +82,7 @@ $("#login-form").addEventListener("submit", async (event) => {
   event.preventDefault();
   $("#login-error").textContent = "";
   try {
-    const session = await api("/api/auth/login", {
+    const session = await api("/admin/api/auth/login", {
       method: "POST",
       body: JSON.stringify({ username: $("#login-user").value, password: $("#login-pass").value }),
     });
@@ -94,7 +94,7 @@ $("#login-form").addEventListener("submit", async (event) => {
 });
 $("#logout").onclick = async () => {
   try {
-    await api("/api/auth/logout", { method: "POST", body: "{}" });
+    await api("/admin/api/auth/logout", { method: "POST", body: "{}" });
   } finally {
     showLogin();
   }
@@ -131,14 +131,13 @@ function openPage(page) {
 }
 $$(".nav button").forEach((button) => (button.onclick = () => openPage(button.dataset.page)));
 async function loadConfig() {
-  config = await api("/api/config");
+  config = await api("/admin/api/config");
   fillConfig(config);
   renderAccessExamples();
 }
 function fillConfig(value) {
   $("#c-listen").value = value.listen;
   $("#c-prefer").value = value.prefer;
-  $("#c-web-listen").value = value.webui.listen;
   $("#c-session").value = value.webui.session_ttl_minutes;
   $("#c-web-enabled").checked = value.webui.enabled;
   $("#c-anonymous").checked = !!value.anonymous;
@@ -166,7 +165,7 @@ function fillConfig(value) {
   ["server_keys", "zen_keys", "go_keys", "proxies"].forEach(renderChips);
   const notice = $("#restart-notice");
   if (value.restart_required_fields?.length) {
-    notice.textContent = `已保存但尚未生效：${value.restart_required_fields.join(", ")}。当前 API ${value.effective.listen}、WebUI ${value.effective.webui_listen}。请重启进程。`;
+    notice.textContent = `已保存但尚未生效：${value.restart_required_fields.join(", ")}。当前 API ${value.effective.listen}、后台 ${value.effective.webui_path}。请重启进程。`;
     notice.classList.remove("hidden");
   } else notice.classList.add("hidden");
 }
@@ -237,12 +236,11 @@ $("#config-form").addEventListener("submit", async (event) => {
       },
       webui: {
         enabled: $("#c-web-enabled").checked,
-        listen: $("#c-web-listen").value,
         username: config.webui.username,
         session_ttl_minutes: number("#c-session"),
       },
     };
-    const result = await api("/api/config", { method: "PUT", body: JSON.stringify(update) });
+    const result = await api("/admin/api/config", { method: "PUT", body: JSON.stringify(update) });
     config = result.config;
     ["server_keys", "zen_keys", "go_keys", "proxies"].forEach(
       (name) => ($(`#${name}-new`).value = ""),
@@ -260,7 +258,7 @@ $("#config-form").addEventListener("submit", async (event) => {
 });
 $("#reload-config").onclick = async () => {
   try {
-    const result = await api("/api/config/reload", { method: "POST", body: "{}" });
+    const result = await api("/admin/api/config/reload", { method: "POST", body: "{}" });
     await loadConfig();
     await loadDebugModels();
     toast(result.restart_required ? "磁盘配置已重载，监听字段需重启" : "磁盘配置已重载");
@@ -272,7 +270,7 @@ $("#reveal").onclick = async () => {
   const password = prompt("请再次输入管理密码");
   if (password === null) return;
   try {
-    const values = await api("/api/config/reveal", {
+    const values = await api("/admin/api/config/reveal", {
       method: "POST",
       body: JSON.stringify({ password }),
     });
@@ -289,7 +287,7 @@ $("#modal-close").onclick = () => {
 $("#account-form").addEventListener("submit", async (event) => {
   event.preventDefault();
   try {
-    await api("/api/account", {
+    await api("/admin/api/account", {
       method: "PUT",
       body: JSON.stringify({
         current_password: $("#a-current").value,
@@ -537,7 +535,7 @@ function renderPlayKeys() {
 }
 async function loadDebugModels() {
   try {
-    debugData = await api("/api/debug/models");
+    debugData = await api("/admin/api/debug/models");
     if (debugData.last_inference) lastPlayground = debugData.last_inference;
     const select = $("#play-model"),
       selected = select.value;
@@ -650,7 +648,7 @@ $("#play-form").addEventListener("submit", async (event) => {
   $("#play-state").textContent =
     key.mode === "selected" ? "指定 Key 测试进行中…" : "Gateway 请求进行中…";
   try {
-    const result = await api("/api/debug/inference", {
+    const result = await api("/admin/api/debug/inference", {
       method: "POST",
       body: JSON.stringify({ protocol: $("#play-protocol").value, key, request }),
     });
@@ -776,7 +774,7 @@ function renderDiagnosticModels() {
 $("#diagnostic-model-search").addEventListener("input", renderDiagnosticModels);
 async function refreshMonitor() {
   try {
-    monitorData = await api("/api/monitor");
+    monitorData = await api("/admin/api/monitor");
     const metrics = monitorData.metrics;
     $("#version").textContent = `version ${monitorData.version}`;
     $("#m-total").textContent = Number(metrics.last_hour.total || 0).toLocaleString();
@@ -863,7 +861,7 @@ $$("[data-scroll]").forEach(
 );
 function connectLogs() {
   if (eventSource) eventSource.close();
-  eventSource = new EventSource("/api/logs/stream");
+  eventSource = new EventSource("/admin/api/logs/stream");
   eventSource.addEventListener("log", (event) => {
     const item = JSON.parse(event.data);
     logEvents.push(item);
@@ -964,7 +962,7 @@ async function loadModelQuotas() {
   $("#quota-refresh").disabled = true;
   $("#quota-refresh").textContent = "读取中…";
   try {
-    const value = await api("/api/model-quotas");
+    const value = await api("/admin/api/model-quotas");
     if (!csrf) return;
     quotaData = value;
     const select = $("#quota-account"),
@@ -1070,7 +1068,7 @@ async function loadAPIKeys() {
   apiKeysLoading = true;
   $("#api-key-refresh").disabled = true;
   try {
-    const data = await api("/api/api-keys");
+    const data = await api("/admin/api/api-keys");
     if (csrf) renderAPIKeys(data.keys);
   } catch (error) {
     $("#api-key-status").textContent = `读取失败：${error.message}`;
@@ -1083,7 +1081,7 @@ async function loadAPIKeys() {
 async function mutateAPIKey(id, method, body, button) {
   button.disabled = true;
   try {
-    const data = await api(`/api/api-keys/${encodeURIComponent(id)}`, {
+    const data = await api(`/admin/api/api-keys/${encodeURIComponent(id)}`, {
       method,
       ...(body ? { body: JSON.stringify(body) } : {}),
     });
@@ -1149,7 +1147,7 @@ $("#api-key-form").onsubmit = async (event) => {
   const button = $("#api-key-create");
   button.disabled = true;
   try {
-    const data = await api("/api/api-keys", {
+    const data = await api("/admin/api/api-keys", {
       method: "POST",
       body: JSON.stringify({ name: $("#api-key-name").value, value: $("#api-key-value").value }),
     });
@@ -1193,7 +1191,7 @@ const rotationReasons = {
 };
 async function loadRotation() {
   try {
-    const value = await api("/api/rotation");
+    const value = await api("/admin/api/rotation");
     if (!csrf) return;
     rotationData = value;
     rotationDirty = false;
@@ -1293,7 +1291,7 @@ function renderRotation() {
       select.onclick = async () => {
         select.disabled = true;
         try {
-          const result = await api("/api/rotation/current", {
+          const result = await api("/admin/api/rotation/current", {
             method: "POST",
             body: JSON.stringify({ group: group.id, model }),
           });
@@ -1376,7 +1374,7 @@ $("#rotation-form").onsubmit = async (event) => {
     const body = { first_output_seconds: Number($("#rotation-timeout").value) };
     for (const group of rotationData.groups)
       body[group.id] = { alias: group.alias.trim(), order: group.order };
-    rotationData = await api("/api/rotation", { method: "PUT", body: JSON.stringify(body) });
+    rotationData = await api("/admin/api/rotation", { method: "PUT", body: JSON.stringify(body) });
     rotationDirty = false;
     renderRotation();
     toast("模型轮转配置已保存并生效");
@@ -1390,7 +1388,7 @@ boot();
 
 async function loadAvailability() {
   try {
-    const data = await api("/api/models/availability");
+    const data = await api("/admin/api/models/availability");
     $("#availability-error").textContent = "";
     $("#availability-models").replaceChildren();
     for (const item of data.models) {
@@ -1420,7 +1418,7 @@ async function loadAvailability() {
         button.disabled = true;
         toggle.disabled = true;
         try {
-          await api("/api/models/restore", {
+          await api("/admin/api/models/restore", {
             method: "POST",
             body: JSON.stringify({ model: item.model }),
           });
@@ -1440,7 +1438,7 @@ async function loadAvailability() {
         button.disabled = true;
         toggle.disabled = true;
         try {
-          await api("/api/models/manual", {
+          await api("/admin/api/models/manual", {
             method: "POST",
             body: JSON.stringify({ model: item.model, manual: !item.manual }),
           });

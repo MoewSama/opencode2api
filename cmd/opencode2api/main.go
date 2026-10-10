@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -24,8 +25,7 @@ var version = "dev"
 func main() {
 	buildinfo.Version = version
 	configPath := flag.String("config", "config.json", "path to config.json")
-	listen := flag.String("listen", "", "override the configured API listen address")
-	webListen := flag.String("web-listen", "", "override the configured WebUI listen address")
+	listen := flag.String("listen", "", "override the configured listen address")
 	flag.Parse()
 
 	cfg, err := config.Load(*configPath)
@@ -35,9 +35,6 @@ func main() {
 	}
 	if *listen != "" {
 		cfg.Listen = *listen
-	}
-	if *webListen != "" {
-		cfg.WebUI.Listen = *webListen
 	}
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -56,20 +53,18 @@ func main() {
 	}
 	defer manager.Shutdown()
 
+	// The management console is mounted on the gateway listener under /admin,
+	// so a single published port serves both the API and the console.
+	handler := manager.Handler()
+	if cfg.WebUI.Enabled {
+		handler = mountAdmin(handler, adminui.New(manager, monitor, hub, logger))
+	}
+
 	apiServer := &http.Server{
-		Addr: cfg.Listen, Handler: manager.Handler(), ReadHeaderTimeout: 15 * time.Second, IdleTimeout: 120 * time.Second,
+		Addr: cfg.Listen, Handler: handler, ReadHeaderTimeout: 15 * time.Second, IdleTimeout: 120 * time.Second,
 	}
 	servers := []*http.Server{apiServer}
 	go serveHTTP(cancel, logger, apiServer, "api")
-
-	if cfg.WebUI.Enabled {
-		admin := adminui.New(manager, monitor, hub, logger)
-		webServer := &http.Server{
-			Addr: cfg.WebUI.Listen, Handler: admin.Handler(), ReadHeaderTimeout: 15 * time.Second, IdleTimeout: 120 * time.Second,
-		}
-		servers = append(servers, webServer)
-		go serveHTTP(cancel, logger, webServer, "webui")
-	}
 
 	<-ctx.Done()
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 15*time.Second)
@@ -79,6 +74,20 @@ func main() {
 			logger.Error("graceful shutdown failed", "component", "server", "event", "shutdown_failed", "address", server.Addr, "error", err)
 		}
 	}
+}
+
+// mountAdmin dispatches the console's path prefix to the console handler and
+// everything else to the gateway. It runs ahead of the gateway so console
+// requests are never interpreted as inference traffic.
+func mountAdmin(api http.Handler, console *adminui.Server) http.Handler {
+	consoleHandler := console.Handler()
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == adminui.AdminBasePath || strings.HasPrefix(r.URL.Path, adminui.AdminBasePath+"/") {
+			consoleHandler.ServeHTTP(w, r)
+			return
+		}
+		api.ServeHTTP(w, r)
+	})
 }
 
 func serveHTTP(cancel context.CancelFunc, logger *slog.Logger, server *http.Server, component string) {
