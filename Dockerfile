@@ -19,17 +19,21 @@ RUN CGO_ENABLED=0 \
       -ldflags="-s -w -X main.version=${VERSION}" \
       -o /out/opencode2api ./cmd/opencode2api
 
-FROM alpine:3.22
+FROM alpine:latest
 
-RUN apk add --no-cache ca-certificates su-exec tzdata \
-    && addgroup -S opencode2api \
-    && adduser -S -G opencode2api -h /var/lib/opencode2api opencode2api \
-    && mkdir -p /app /var/lib/opencode2api \
-    && chown -R opencode2api:opencode2api /app /var/lib/opencode2api
+# Runs as root by design. The container is a single-process appliance whose
+# state dir is typically a bind mount the operator owns on the host, so dropping
+# to a build-time uid only adds an id-mapping failure mode without protecting
+# anything the operator cannot already reach. See docker-entrypoint.sh, which
+# deliberately does not re-exec through su-exec.
+RUN apk add --no-cache ca-certificates tzdata \
+    && mkdir -p /app /var/lib/opencode2api
 
 COPY --from=builder /out/opencode2api /usr/local/bin/opencode2api
 COPY --chmod=0755 docker-entrypoint.sh /usr/local/bin/docker-entrypoint
-COPY --chown=opencode2api:opencode2api config.example.json /app/config.example.json
+COPY config.example.json /app/config.example.json
+COPY LICENSE /usr/share/licenses/opencode2api/LICENSE
+LABEL org.opencontainers.image.licenses="GPL-3.0-or-later"
 
 # LISTEN_ADDRESS / WEBUI_LISTEN_ADDRESS are intentionally unset: config.json is
 # authoritative. Export them to override the configured listen addresses.
@@ -45,5 +49,8 @@ EXPOSE 8080 8081
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD wget -q -O /dev/null http://127.0.0.1:8080/healthz || exit 1
+
+# Explicit so a base-image USER change cannot silently alter the contract.
+USER root
 
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint"]

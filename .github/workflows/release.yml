@@ -128,7 +128,8 @@ jobs:
         run: |
           mkdir -p "dist/$PACKAGE_NAME"
           go build -trimpath -ldflags="-s -w -X main.version=$RELEASE_TAG" -o "dist/$PACKAGE_NAME/opencode2api$EXTENSION" ./cmd/opencode2api
-          cp README.md README.zh-CN.md config.example.json "dist/$PACKAGE_NAME/"
+          cp README.md README.zh-CN.md LICENSE config.example.json "dist/$PACKAGE_NAME/"
+          cp -r docs "dist/$PACKAGE_NAME/"
           if [[ "$ARCHIVE_FORMAT" == "zip" ]]; then
             (cd dist && zip -q -r "$PACKAGE_NAME.zip" "$PACKAGE_NAME")
             archive="$PACKAGE_NAME.zip"
@@ -158,9 +159,6 @@ jobs:
       - name: Check out source
         uses: actions/checkout@v4
 
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -176,20 +174,22 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ${{ needs.prepare.outputs.image_name }}
+          # Fork convention: publish only the release tag plus a rolling
+          # :latest (upstream additionally aliases 1.2 and 1).
           tags: |
+            type=raw,value=latest
             type=raw,value=${{ needs.prepare.outputs.release_tag }}
-            type=semver,pattern={{version}},value=${{ needs.prepare.outputs.release_tag }}
-            type=semver,pattern={{major}}.{{minor}},value=${{ needs.prepare.outputs.release_tag }},enable=${{ !contains(needs.prepare.outputs.release_tag, '-') }}
-            type=semver,pattern={{major}},value=${{ needs.prepare.outputs.release_tag }},enable=${{ !contains(needs.prepare.outputs.release_tag, '-') }}
           labels: |
             org.opencontainers.image.title=opencode2api
             org.opencontainers.image.description=OpenAI-compatible API gateway for OpenCode Zen and Go
+            org.opencontainers.image.licenses=GPL-3.0-or-later
 
       - name: Build and push image
         uses: docker/build-push-action@v6
         with:
           context: .
-          platforms: linux/amd64,linux/arm64
+          # amd64 only: the fork ships a single-arch image.
+          platforms: linux/amd64
           push: true
           tags: ${{ steps.image_metadata.outputs.tags }}
           labels: ${{ steps.image_metadata.outputs.labels }}

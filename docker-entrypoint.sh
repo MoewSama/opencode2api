@@ -9,11 +9,9 @@ config_seed_path=${CONFIG_SEED_PATH:-}
 listen_address=${LISTEN_ADDRESS:-}
 webui_listen_address=${WEBUI_LISTEN_ADDRESS:-}
 
-if [ "$(id -u)" = "0" ]; then
-    mkdir -p "$state_dir"
-    chown opencode2api:opencode2api "$state_dir"
-    exec su-exec opencode2api:opencode2api "$0" "$@"
-fi
+# The image runs as root on purpose (see Dockerfile): no user switch here, only
+# ensure the state dir exists so a fresh named volume is immediately writable.
+mkdir -p "$state_dir"
 
 if [ "$#" -gt 0 ]; then
     exec "$@"
